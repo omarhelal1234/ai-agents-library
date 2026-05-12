@@ -562,7 +562,7 @@ async function loadSupabaseOrgs() {
 }
 
 // ----- Init -----
-document.addEventListener("DOMContentLoaded", async () => {
+async function init() {
   // Auto-seed keys from config.js if present and slots are empty
   seedFromAutoConfig();
 
@@ -595,4 +595,5 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("nav-settings").addEventListener("click", openSettings);
 
   // Settings modal
-  $("settings-save").addEventListener("click",
+  $("settings-save").addEventListener("click", applySettings);
+  $("settings-clear
