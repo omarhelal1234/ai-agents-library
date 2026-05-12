@@ -1,10 +1,21 @@
 // Supabase Management API client for browser use.
 // Auth: personal access token from https://supabase.com/dashboard/account/tokens
 //
-// Note: the Management API is intended for organization-scoped automation,
-// not anonymous browser apps. Tokens grant full org access — treat with care.
+// The Management API doesn't include the right CORS headers for arbitrary
+// origins (github.io etc.), so calls from a browser SPA are blocked. To work
+// around this, we route every request through an Edge Function proxy that
+// lives on a Supabase project YOU control. The proxy ONLY forwards the
+// request to api.supabase.com — it never reads, writes, or creates anything
+// in that host project. Every new project the orchestrator provisions is
+// still a separate, fresh project in your org.
+//
+// Set window.AGENCY_CONFIG.supaProxyBase = "https://<ref>.supabase.co/functions/v1/mgmt-proxy"
+// to enable. Falls back to api.supabase.com when not set (only works server-side).
 
-const SB = "https://api.supabase.com";
+function apiBase() {
+  const cfg = (typeof window !== "undefined" && window.AGENCY_CONFIG) || {};
+  return cfg.supaProxyBase || "https://api.supabase.com";
+}
 
 function headers(token, json = true) {
   const h = { "Authorization": `Bearer ${token}`, "Accept": "application/json" };
@@ -13,7 +24,8 @@ function headers(token, json = true) {
 }
 
 async function sb(token, path, init = {}) {
-  const res = await fetch(`${SB}${path}`, {
+  const url = `${apiBase()}${path}`;
+  const res = await fetch(url, {
     ...init,
     headers: { ...headers(token, init.body != null), ...(init.headers || {}) },
   });
@@ -36,7 +48,6 @@ export function genDbPassword() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789-_!@#%";
   let out = "";
   for (let i = 0; i < arr.length; i++) out += alphabet[arr[i] % alphabet.length];
-  // Ensure at least one of each class
   return out + "Aa9!";
 }
 
@@ -61,8 +72,6 @@ export async function listProjects(token) {
   return sb(token, `/v1/projects`);
 }
 
-// Poll until the project leaves ACTIVE_HEALTHY → INACTIVE → COMING_UP → ACTIVE_HEALTHY
-// Returns once status === "ACTIVE_HEALTHY" or throws after timeout.
 export async function waitForProjectActive(token, ref, { timeoutMs = 180_000, intervalMs = 5_000, onTick } = {}) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -74,12 +83,10 @@ export async function waitForProjectActive(token, ref, { timeoutMs = 180_000, in
   throw new Error(`Supabase project ${ref} did not reach ACTIVE_HEALTHY within ${timeoutMs}ms`);
 }
 
-// Fetch project API keys (anon + service_role).
 export async function getApiKeys(token, ref) {
   return sb(token, `/v1/projects/${ref}/api-keys`);
 }
 
-// Run arbitrary SQL via the management API.
 export async function runSQL(token, ref, query) {
   return sb(token, `/v1/projects/${ref}/database/query`, {
     method: "POST",

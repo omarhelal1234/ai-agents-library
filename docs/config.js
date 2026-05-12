@@ -42,6 +42,7 @@
     ]),
     ghOwner: "omarhelal1234",
     supaOrg: "brvymursywhdlcxrxcwf",
+    supaProxyBase: "https://apcfnzbiylhgiutcjigg.supabase.co/functions/v1/mgmt-proxy",
     supaRegion: "us-east-1",
     agentsRepo: "omarhelal1234/ai-agents-library",
   };
