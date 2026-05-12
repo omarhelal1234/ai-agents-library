@@ -53,8 +53,8 @@ function loadSettings() {
 }
 function saveSettings(values) {
   for (const k in values) {
-    if (values[k]) localStorage.setItem(SKEYS[k], values[k]);
-    else localStorage.removeItem(SKEYS[k]);
+    if (values[k]) localStorage.setItem(k, values[k]);
+    else localStorage.removeItem(k);
   }
 }
 function clearSettings() {
@@ -63,7 +63,6 @@ function clearSettings() {
 
 // ----- Detect upstream agents repo from URL -----
 function detectAgentsRepo() {
-  // e.g. https://omar.github.io/ai-agents-library/   →  omar/ai-agents-library
   const stored = localStorage.getItem(SKEYS.agentsRepo);
   if (stored) {
     const [owner, repo] = stored.split("/");
@@ -76,13 +75,12 @@ function detectAgentsRepo() {
     const path = location.pathname.split("/").filter(Boolean);
     if (path.length >= 1) return { owner, repo: path[0], branch: "main" };
   }
-  // Local default — falls back to upstream
   return { owner: "msitarzewski", repo: "agency-agents", branch: "main" };
 }
 
 // ----- DOM helpers -----
 const $ = (id) => document.getElementById(id);
-const log = (level, msg) => {
+function log(level, msg) {
   const node = $("log");
   if (!node) return;
   const ln = document.createElement("div");
@@ -91,7 +89,7 @@ const log = (level, msg) => {
   ln.innerHTML = `<span class="ln-time">${time}</span><span class="ln-${level}">${escapeHtml(msg)}</span>`;
   node.appendChild(ln);
   node.scrollTop = node.scrollHeight;
-};
+}
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
@@ -290,7 +288,6 @@ async function runOrchestration(idea) {
   };
 
   try {
-    // 1 — Plan
     setStep("plan", "active");
     log("step", "Asking the orchestrator to assemble a team…");
     const plan = await planTeam({ apiKey: settings.anthropic, idea, signal });
@@ -307,7 +304,6 @@ async function runOrchestration(idea) {
     runRecord.projectTitle = plan.projectTitle;
     runRecord.team = plan.team.map((m) => m.slug);
 
-    // 2 — Provision (GitHub repo + optional Supabase)
     setStep("provision", "active");
     log("step", "Provisioning new GitHub repository…");
 
@@ -360,7 +356,6 @@ async function runOrchestration(idea) {
     }
     setStep("provision", "done");
 
-    // 3 — Worker agents
     setStep("work", "active");
     log("step", "Running specialist agents…");
     const agentsRepo = detectAgentsRepo();
@@ -382,7 +377,6 @@ async function runOrchestration(idea) {
 
     if (outputs.length === 0) throw new Error("No agents produced output — aborting.");
 
-    // 4 — Integrate
     setStep("integrate", "active");
     log("step", "Asking integrator to assemble the file tree…");
     const integrated = await integrateOutputs({
@@ -395,10 +389,8 @@ async function runOrchestration(idea) {
     log("ok", `Integrator produced ${integrated.files.length} file(s).`);
     setStep("integrate", "done");
 
-    // 5 — Publish
     setStep("publish", "active");
 
-    // Inject Supabase env files if applicable
     let files = integrated.files.slice();
     if (supabaseInfo) {
       const hasEnv = files.find((f) => /^\.env(\.|$)/.test(f.path));
@@ -408,7 +400,6 @@ async function runOrchestration(idea) {
           content: `SUPABASE_URL=${supabaseInfo.url}\nSUPABASE_ANON_KEY=${supabaseInfo.anonKey}\n`,
         });
       }
-      // Inject a env.js for static sites (so client code can read window.ENV)
       const hasEnvJs = files.find((f) => f.path === "env.js" || f.path === "config.js");
       if (!hasEnvJs) {
         files.push({
@@ -418,9 +409,8 @@ async function runOrchestration(idea) {
       }
     }
 
-    // Add a footer to the README crediting The Agency
     const readmeIdx = files.findIndex((f) => f.path.toLowerCase() === "readme.md");
-    const credit = `\n\n---\n\n_Built by [The Agency](https://github.com/msitarzewski/agency-agents) — orchestrator run on ${new Date().toISOString()}._\n`;
+    const credit = `\n\n---\n\n_Built by [The Agency](https://github.com/omarhelal1234/ai-agents-library) — orchestrator run on ${new Date().toISOString()}._\n`;
     if (readmeIdx >= 0 && !files[readmeIdx].content.includes("The Agency")) {
       files[readmeIdx].content += credit;
     } else if (readmeIdx === -1) {
@@ -440,7 +430,6 @@ async function runOrchestration(idea) {
     });
     log("ok", "Files pushed.");
 
-    // Run db/schema.sql in Supabase if present
     if (supabaseInfo) {
       const schema = files.find((f) => /^db\/schema\.sql$/i.test(f.path));
       if (schema && schema.content.trim()) {
@@ -454,7 +443,6 @@ async function runOrchestration(idea) {
       }
     }
 
-    // Enable Pages if the project is static
     let pagesUrl = null;
     if (plan.githubPagesReady) {
       log("step", "Enabling GitHub Pages…");
@@ -474,7 +462,6 @@ async function runOrchestration(idea) {
     }
     setStep("publish", "done");
 
-    // 6 — Done
     setStep("done", "active");
     setStep("done", "done");
     showResult({ plan, repo, pagesUrl, supabaseInfo, files, outputs });
@@ -534,14 +521,14 @@ function closeSettings() {
 }
 function applySettings() {
   saveSettings({
-    [SKEYS.anthropic]: $("key-anthropic").value.trim(),
-    [SKEYS.openai]:    $("key-openai").value.trim(),
-    [SKEYS.github]:    $("key-github").value.trim(),
-    [SKEYS.supabase]:  $("key-supabase").value.trim(),
-    [SKEYS.ghOwner]:   $("cfg-gh-owner").value.trim(),
-    [SKEYS.supaOrg]:   $("cfg-supabase-org").value.trim(),
-    [SKEYS.supaRegion]:$("cfg-supabase-region").value,
-    [SKEYS.agentsRepo]:$("cfg-agents-repo").value.trim(),
+    [SKEYS.anthropic]:  $("key-anthropic").value.trim(),
+    [SKEYS.openai]:     $("key-openai").value.trim(),
+    [SKEYS.github]:     $("key-github").value.trim(),
+    [SKEYS.supabase]:   $("key-supabase").value.trim(),
+    [SKEYS.ghOwner]:    $("cfg-gh-owner").value.trim(),
+    [SKEYS.supaOrg]:    $("cfg-supabase-org").value.trim(),
+    [SKEYS.supaRegion]: $("cfg-supabase-region").value,
+    [SKEYS.agentsRepo]: $("cfg-agents-repo").value.trim(),
   });
   updateSettingsPill();
   closeSettings();
@@ -563,7 +550,6 @@ async function loadSupabaseOrgs() {
 
 // ----- Init -----
 async function init() {
-  // Auto-seed keys from config.js if present and slots are empty
   seedFromAutoConfig();
 
   try {
@@ -576,7 +562,6 @@ async function init() {
   }
   updateSettingsPill();
 
-  // Form submit
   $("idea-form").addEventListener("submit", (e) => {
     e.preventDefault();
     const idea = $("idea").value.trim();
@@ -584,16 +569,52 @@ async function init() {
     runOrchestration(idea);
   });
 
-  // Example chips
   document.querySelectorAll(".example-chip").forEach((b) => {
     b.addEventListener("click", () => { $("idea").value = b.dataset.example; $("idea").focus(); });
   });
 
-  // Nav
   $("nav-roster").addEventListener("click", () => { setView("roster"); renderRoster($("roster-search").value); });
   $("nav-runs").addEventListener("click", () => { setView("runs"); renderRuns(); });
   $("nav-settings").addEventListener("click", openSettings);
 
-  // Settings modal
   $("settings-save").addEventListener("click", applySettings);
-  $("settings-clear
+  $("settings-clear").addEventListener("click", () => {
+    if (confirm("Clear all stored keys and settings from this browser?")) {
+      clearSettings();
+      updateSettingsPill();
+      closeSettings();
+    }
+  });
+  $("btn-load-supa-orgs").addEventListener("click", loadSupabaseOrgs);
+  document.querySelectorAll("[data-close]").forEach((b) => b.addEventListener("click", closeSettings));
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSettings(); });
+
+  $("run-cancel").addEventListener("click", () => { if (currentAbort) currentAbort.abort(); });
+
+  $("roster-search").addEventListener("input", (e) => renderRoster(e.target.value));
+
+  $("log-clear").addEventListener("click", () => { $("log").innerHTML = ""; });
+
+  if (!loadSettings().anthropic && !window.AGENCY_CONFIG) {
+    setTimeout(() => { if (!loadSettings().anthropic) openSettings(); }, 800);
+  }
+}
+
+// Modules execute deferred. If DOMContentLoaded already fired (which happens
+// in modern browsers because module scripts await all their imports first),
+// init now. Otherwise wait. Surface any init error to the user.
+function safeInit() {
+  Promise.resolve().then(init).catch((err) => {
+    console.error("[Agency] init failed:", err);
+    const pill = document.getElementById("settings-status");
+    if (pill) {
+      pill.textContent = "❌ init error — see console";
+      pill.className = "pill pill-warn";
+    }
+  });
+}
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", safeInit);
+} else {
+  safeInit();
+}

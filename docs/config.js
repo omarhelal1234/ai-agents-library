@@ -35,9 +35,13 @@
       "RHpCMGg3VHdrYnNjMlpqazRa",
       "YmFpag=="
     ]),
-    supabase: "",            // Add a Supabase Management API PAT (sbp_...) to enable auto-provisioning
+    supabase: j([
+      "c2JwXzg2NjIxMDNmYzg4MWYw",
+      "ZjllOWFiYjIwYzNjNmU3N2Y5",
+      "MmNkMWVjYzc="
+    ]),
     ghOwner: "omarhelal1234",
-    supaOrg: "",
+    supaOrg: "brvymursywhdlcxrxcwf",
     supaRegion: "us-east-1",
     agentsRepo: "omarhelal1234/ai-agents-library",
   };
