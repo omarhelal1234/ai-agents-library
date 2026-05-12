@@ -183,6 +183,9 @@
     <span>🎭 The Agency Orchestrator — runs entirely in your browser. <a href="https://github.com/msitarzewski/agency-agents" target="_blank" rel="noopener">Source repo</a> · MIT</span>
   </footer>
 
+  <!-- Optional: define window.AGENCY_CONFIG to auto-seed localStorage on first load.
+       Loaded before main.js so the controller can read it on init. -->
+  <script src="config.js" onerror="window.__noConfig=true"></script>
   <script type="module" src="js/main.js"></script>
 </body>
 </html>

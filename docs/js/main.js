@@ -19,6 +19,32 @@ const SKEYS = {
   runs:      "agency.runs",
 };
 
+// Seed localStorage from window.AGENCY_CONFIG (defined in /config.js) on first
+// load — only fills slots that are empty so user-saved values always win.
+function seedFromAutoConfig() {
+  const cfg = window.AGENCY_CONFIG;
+  if (!cfg || typeof cfg !== "object") return false;
+  let touched = false;
+  const map = {
+    anthropic:  SKEYS.anthropic,
+    openai:     SKEYS.openai,
+    github:     SKEYS.github,
+    supabase:   SKEYS.supabase,
+    ghOwner:    SKEYS.ghOwner,
+    supaOrg:    SKEYS.supaOrg,
+    supaRegion: SKEYS.supaRegion,
+    agentsRepo: SKEYS.agentsRepo,
+  };
+  for (const [k, storageKey] of Object.entries(map)) {
+    const v = cfg[k];
+    if (v && !localStorage.getItem(storageKey)) {
+      localStorage.setItem(storageKey, v);
+      touched = true;
+    }
+  }
+  return touched;
+}
+
 function loadSettings() {
   const s = {};
   for (const k in SKEYS) s[k] = localStorage.getItem(SKEYS[k]) || "";
@@ -100,8 +126,9 @@ function updateSettingsPill() {
   const pill = $("settings-status");
   const btn = $("run-btn");
   const hasMin = s.anthropic && s.github;
+  const fromConfig = !!window.AGENCY_CONFIG;
   if (hasMin) {
-    pill.textContent = "✅ Ready";
+    pill.textContent = fromConfig ? "✅ Ready · keys auto-loaded" : "✅ Ready";
     pill.className = "pill pill-ok";
     btn.disabled = false;
   } else {
@@ -536,6 +563,9 @@ async function loadSupabaseOrgs() {
 
 // ----- Init -----
 document.addEventListener("DOMContentLoaded", async () => {
+  // Auto-seed keys from config.js if present and slots are empty
+  seedFromAutoConfig();
+
   try {
     const reg = await loadRegistry();
     $("agent-count").textContent = reg.totalAgents;
@@ -565,35 +595,4 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("nav-settings").addEventListener("click", openSettings);
 
   // Settings modal
-  $("settings-save").addEventListener("click", applySettings);
-  $("settings-clear").addEventListener("click", () => {
-    if (confirm("Clear all stored keys and settings from this browser?")) {
-      clearSettings();
-      updateSettingsPill();
-      closeSettings();
-    }
-  });
-  $("btn-load-supa-orgs").addEventListener("click", loadSupabaseOrgs);
-  document.querySelectorAll("[data-close]").forEach((b) => b.addEventListener("click", closeSettings));
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeSettings();
-  });
-
-  // Cancel run
-  $("run-cancel").addEventListener("click", () => {
-    if (currentAbort) currentAbort.abort();
-  });
-
-  // Roster search
-  $("roster-search").addEventListener("input", (e) => renderRoster(e.target.value));
-
-  // Log clear
-  $("log-clear").addEventListener("click", () => { $("log").innerHTML = ""; });
-
-  // First-time hint
-  if (!loadSettings().anthropic) {
-    setTimeout(() => {
-      if (!loadSettings().anthropic) openSettings();
-    }, 800);
-  }
-});
+  $("settings-save").addEventListener("click",
