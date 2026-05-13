@@ -183,10 +183,16 @@ export async function callClaudeJSON({ apiKey, system, user, max_tokens = 6000, 
 
 export function extractJSON(text) {
   if (!text) throw new Error("Empty response");
-  // Strip ```json fences
   let t = text.trim();
-  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fence) t = fence[1].trim();
+
+  // Only strip markdown fences if the content doesn't start with { or [
+  // (the lazy regex can grab a fence INSIDE a JSON string value and corrupt the parse)
+  if (t[0] !== "{" && t[0] !== "[") {
+    // Use greedy match to grab from first opening fence to LAST closing fence
+    const fence = t.match(/```(?:json)?\s*([\s\S]*)```\s*$/i);
+    if (fence) t = fence[1].trim();
+  }
+
   // Find first { or [
   const firstObj = t.indexOf("{");
   const firstArr = t.indexOf("[");
@@ -195,10 +201,10 @@ export function extractJSON(text) {
   else if (firstArr === -1) start = firstObj;
   else start = Math.min(firstObj, firstArr);
   if (start === -1) throw new Error("No JSON found in response");
-  // Balance braces
+  // Balance braces — track both {} and [] depths for proper nesting
   const open = t[start];
   const close = open === "{" ? "}" : "]";
-  let depth = 0, end = -1, inStr = false, esc = false;
+  let objDepth = 0, arrDepth = 0, end = -1, inStr = false, esc = false;
   for (let i = start; i < t.length; i++) {
     const c = t[i];
     if (inStr) {
@@ -208,8 +214,13 @@ export function extractJSON(text) {
       continue;
     }
     if (c === '"') { inStr = true; continue; }
-    if (c === open) depth++;
-    else if (c === close) { depth--; if (depth === 0) { end = i + 1; break; } }
+    if (c === '{') objDepth++;
+    else if (c === '}') objDepth--;
+    else if (c === '[') arrDepth++;
+    else if (c === ']') arrDepth--;
+    // We're done when we close the outermost bracket we started with
+    if (open === '{' && objDepth === 0 && arrDepth === 0 && c === '}') { end = i + 1; break; }
+    if (open === '[' && objDepth === 0 && arrDepth === 0 && c === ']') { end = i + 1; break; }
   }
   if (end === -1) {
     // Attempt to repair truncated JSON (output hit max_tokens)
