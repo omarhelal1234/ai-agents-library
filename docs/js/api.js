@@ -211,8 +211,70 @@ export function extractJSON(text) {
     if (c === open) depth++;
     else if (c === close) { depth--; if (depth === 0) { end = i + 1; break; } }
   }
-  if (end === -1) throw new Error("Unbalanced JSON in response");
+  if (end === -1) {
+    // Attempt to repair truncated JSON (output hit max_tokens)
+    const repaired = repairTruncatedJSON(t.slice(start));
+    if (repaired) return repaired;
+    throw new Error("Unbalanced JSON in response");
+  }
   const json = t.slice(start, end);
   try { return JSON.parse(json); }
   catch (e) { throw new Error(`Invalid JSON: ${e.message}\n--- text ---\n${json.slice(0,400)}`); }
+}
+
+// Attempt to recover a usable integrator response from truncated JSON.
+// Strategy: find all complete {"path":...,"content":...} objects in the files array,
+// close the structure, and return what we have.
+function repairTruncatedJSON(raw) {
+  try {
+    // Find the "files" array start
+    const filesIdx = raw.indexOf('"files"');
+    if (filesIdx === -1) return null;
+    const arrStart = raw.indexOf('[', filesIdx);
+    if (arrStart === -1) return null;
+
+    // Collect complete file objects by scanning for balanced {}
+    const files = [];
+    let i = arrStart + 1;
+    while (i < raw.length) {
+      // Find next object start
+      while (i < raw.length && raw[i] !== '{') i++;
+      if (i >= raw.length) break;
+      // Find balanced end of this object
+      let depth = 0, end = -1, inStr = false, esc = false;
+      for (let j = i; j < raw.length; j++) {
+        const c = raw[j];
+        if (inStr) {
+          if (esc) { esc = false; continue; }
+          if (c === '\\') { esc = true; continue; }
+          if (c === '"') inStr = false;
+          continue;
+        }
+        if (c === '"') { inStr = true; continue; }
+        if (c === '{') depth++;
+        else if (c === '}') { depth--; if (depth === 0) { end = j + 1; break; } }
+      }
+      if (end === -1) break; // truncated mid-object — discard
+      try {
+        const obj = JSON.parse(raw.slice(i, end));
+        if (typeof obj.path === 'string' && typeof obj.content === 'string') {
+          files.push(obj);
+        }
+      } catch { /* skip malformed */ }
+      i = end;
+    }
+    if (files.length === 0) return null;
+
+    // Try to extract summary/homepageHint from before the files array
+    let summary = "";
+    let homepageHint = "index.html";
+    const sumMatch = raw.match(/"summary"\s*:\s*"([^"]*)"/); 
+    if (sumMatch) summary = sumMatch[1];
+    const hpMatch = raw.match(/"homepageHint"\s*:\s*"([^"]*)"/); 
+    if (hpMatch) homepageHint = hpMatch[1];
+
+    return { files, summary, homepageHint, _repaired: true };
+  } catch {
+    return null;
+  }
 }

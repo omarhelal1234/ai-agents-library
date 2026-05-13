@@ -215,7 +215,7 @@ Now produce the final file tree JSON.`;
   const parsed = await retryAsync(
     async (attempt) => {
       // Bump tokens on retry to fight truncation, which is the #1 cause of Unbalanced JSON.
-      const max_tokens = attempt === 1 ? 16000 : attempt === 2 ? 24000 : 32000;
+      const max_tokens = attempt === 1 ? 32000 : attempt === 2 ? 64000 : 128000;
       const { text, usage } = await callClaudeStream({
         apiKey,
         system: INTEGRATOR_SYSTEM,
