@@ -197,8 +197,16 @@
     <span>🎭 The Agency Orchestrator — runs entirely in your browser. <a href="https://github.com/msitarzewski/agency-agents" target="_blank" rel="noopener">Source repo</a> · MIT</span>
   </footer>
 
-  <!-- All credentials are now encrypted in the Supabase state DB; config.js is
-       deliberately not loaded to prevent committing keys to the repo. -->
+  <!-- State backend auto-config — no secrets here, just the public URL + anon key
+       so the app knows where to store encrypted secrets. -->
+  <script>
+    window.AGENCY_CONFIG = {
+      state: {
+        supabaseUrl:     "https://ztdwgrlregbcgtalqkuh.supabase.co",
+        supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp0ZHdncmxyZWdiY2d0YWxxa3VoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2MzExNTIsImV4cCI6MjA5NDIwNzE1Mn0.dH9SMDUxrSNlHcQQ2Sjl-lKRnzu0l4Jlx21WiDIOu_c"
+      }
+    };
+  </script>
   <script type="module" src="js/main.js"></script>
 </body>
 </html>
