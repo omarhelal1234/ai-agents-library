@@ -42,6 +42,70 @@ export async function callClaude({
   return { text, raw: data, usage: data.usage };
 }
 
+// Streaming Anthropic call — keeps the connection alive with SSE chunks,
+// preventing Safari/WebKit "Load failed" on long-running integrator requests.
+export async function callClaudeStream({
+  apiKey,
+  system,
+  messages,
+  model = DEFAULT_CLAUDE_MODEL,
+  max_tokens = 4096,
+  temperature = 0.4,
+  signal,
+}) {
+  if (!apiKey) throw new Error("Missing Anthropic API key");
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": ANTHROPIC_VERSION,
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    signal,
+    body: JSON.stringify({
+      model,
+      max_tokens,
+      temperature,
+      system,
+      messages,
+      stream: true,
+    }),
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`Anthropic ${res.status}: ${txt.slice(0, 400)}`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let text = "";
+  let usage = null;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop(); // keep incomplete last line in buffer
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const payload = line.slice(6).trim();
+      if (payload === "[DONE]") continue;
+      try {
+        const evt = JSON.parse(payload);
+        if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta") {
+          text += evt.delta.text;
+        } else if (evt.type === "message_delta" && evt.usage) {
+          usage = { ...usage, ...evt.usage };
+        } else if (evt.type === "message_start" && evt.message?.usage) {
+          usage = { ...usage, ...evt.message.usage };
+        }
+      } catch {}
+    }
+  }
+  return { text, usage };
+}
+
 // ---------------------------------------------------------------- OpenAI
 export async function callOpenAI({
   apiKey,

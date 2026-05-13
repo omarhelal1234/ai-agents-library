@@ -847,6 +847,63 @@ function showResult({ plan, repoFullName, repoUrl, pagesUrl, supabaseInfo, files
 // ----- Settings modal -----
 function openSettings() {
   const s = loadSettings();
+  // Always populate state backend fields (non-secret)
+  if ($("cfg-state-url"))     $("cfg-state-url").value     = s.stateUrl;
+  if ($("cfg-state-anonkey")) $("cfg-state-anonkey").value = s.stateKey;
+  // Clear passphrase field and hide protected section
+  $("cfg-passphrase").value = "";
+  $("settings-protected").classList.add("hidden");
+  $("btn-unlock-settings").classList.remove("hidden");
+  $("unlock-error").classList.add("hidden");
+  // Clear all sensitive fields so nothing leaks before unlock
+  $("key-anthropic").value = "";
+  $("key-openai").value = "";
+  $("key-github").value = "";
+  $("key-supabase").value = "";
+  $("cfg-gh-owner").value = "";
+  $("cfg-supabase-org").value = "";
+  $("cfg-supabase-region").value = "us-east-1";
+  $("cfg-agents-repo").value = "";
+  if ($("cfg-supabase-proxy")) $("cfg-supabase-proxy").value = "";
+  $("modal-settings").classList.remove("hidden");
+}
+
+async function unlockSettings() {
+  const passInput = $("cfg-passphrase");
+  const passphrase = passInput ? passInput.value : "";
+  if (!passphrase) {
+    $("unlock-error").textContent = "Enter a passphrase to unlock settings.";
+    $("unlock-error").classList.remove("hidden");
+    return;
+  }
+  // Verify against canary if one exists
+  if (state.hasStateBackend()) {
+    try {
+      const canary = await state.getCanarySecret();
+      if (canary) {
+        const ok = await cryptoMod.verifyPassphrase(canary, passphrase);
+        if (!ok) {
+          $("unlock-error").textContent = "Wrong passphrase. Try again.";
+          $("unlock-error").classList.remove("hidden");
+          return;
+        }
+      }
+    } catch {}
+  }
+  // Cache the passphrase and decrypt secrets
+  cryptoMod.setPassphrase(passphrase);
+  if (state.hasStateBackend()) {
+    try {
+      _decryptedSecrets = await state.loadSecrets(passphrase);
+    } catch (e) {
+      $("unlock-error").textContent = `Decryption failed: ${e.message}`;
+      $("unlock-error").classList.remove("hidden");
+      cryptoMod.clearPassphrase();
+      return;
+    }
+  }
+  // Now populate the fields
+  const s = loadSettings();
   $("key-anthropic").value = s.anthropic;
   $("key-openai").value = s.openai;
   $("key-github").value = s.github;
@@ -856,11 +913,27 @@ function openSettings() {
   $("cfg-supabase-region").value = s.supaRegion || "us-east-1";
   $("cfg-agents-repo").value = s.agentsRepo;
   if ($("cfg-supabase-proxy")) $("cfg-supabase-proxy").value = s.supaProxy;
-  if ($("cfg-state-url"))     $("cfg-state-url").value     = s.stateUrl;
-  if ($("cfg-state-anonkey")) $("cfg-state-anonkey").value = s.stateKey;
-  $("modal-settings").classList.remove("hidden");
+  // Reveal the protected section and hide the unlock button
+  $("settings-protected").classList.remove("hidden");
+  $("btn-unlock-settings").classList.add("hidden");
+  $("unlock-error").classList.add("hidden");
 }
+
 function closeSettings() {
+  // Clear all sensitive fields on close
+  $("key-anthropic").value = "";
+  $("key-openai").value = "";
+  $("key-github").value = "";
+  $("key-supabase").value = "";
+  $("cfg-passphrase").value = "";
+  $("cfg-gh-owner").value = "";
+  $("cfg-supabase-org").value = "";
+  if ($("cfg-supabase-proxy")) $("cfg-supabase-proxy").value = "";
+  $("cfg-agents-repo").value = "";
+  // Re-hide protected section
+  $("settings-protected").classList.add("hidden");
+  $("btn-unlock-settings").classList.remove("hidden");
+  $("unlock-error").classList.add("hidden");
   $("modal-settings").classList.add("hidden");
 }
 async function applySettings() {
@@ -947,6 +1020,10 @@ async function init() {
   $("nav-settings").addEventListener("click", openSettings);
 
   $("settings-save").addEventListener("click", applySettings);
+  $("btn-unlock-settings").addEventListener("click", unlockSettings);
+  $("cfg-passphrase").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); unlockSettings(); }
+  });
   $("settings-clear").addEventListener("click", () => {
     if (confirm("Clear all stored keys and settings from this browser?")) {
       clearSettings();

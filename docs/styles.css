@@ -357,6 +357,8 @@ input, textarea, select { font: inherit; color: inherit; }
 .modal-body code { background: var(--surface); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
 .modal-actions { display: flex; gap: 8px; margin-top: 20px; flex-wrap: wrap; }
 .modal-actions .danger-ghost { margin-left: auto; }
+#btn-unlock-settings { margin-top: 8px; width: 100%; }
+.unlock-error { color: var(--red); font-size: 13px; margin-top: 8px; }
 
 /* FOOTER */
 .footer { text-align: center; color: var(--text3); padding: 30px 20px; font-size: 13px; border-top: 1px solid var(--border); margin-top: 40px; }

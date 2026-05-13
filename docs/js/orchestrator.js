@@ -1,7 +1,7 @@
 // Orchestrator: given an idea + the full agent catalog, asks Claude to assemble
 // the right team and a phased execution plan. Output is strict JSON.
 
-import { callClaudeJSON, callClaude, extractJSON } from "./api.js";
+import { callClaudeJSON, callClaude, callClaudeStream, extractJSON } from "./api.js";
 import { buildCatalogForPrompt } from "./agents.js";
 import { retryAsync } from "./retry.js";
 
@@ -181,7 +181,19 @@ REQUIREMENTS
 //   - Bumps max_tokens on retry to widen the recovery window for the most common
 //     failure mode (output truncation).
 export async function integrateOutputs({ apiKey, plan, outputs, hasSupabase, signal, onAttempt }) {
-  const blocks = outputs.map((o) => `## ${o.slug} (${o.name})\n\n${o.output}`).join("\n\n---\n\n");
+  const MAX_AGENT_CHARS = 12000;
+  const MAX_TOTAL_CHARS = 90000;
+  let used = 0;
+  const blocks = outputs.map((o) => {
+    const remaining = Math.max(0, MAX_TOTAL_CHARS - used);
+    const limit = Math.min(MAX_AGENT_CHARS, remaining);
+    const raw = String(o.output || "");
+    const content = raw.length > limit
+      ? raw.slice(0, limit) + `\n\n[truncated ${raw.length - limit} chars]`
+      : raw;
+    used += content.length;
+    return `## ${o.slug} (${o.name})\n\n${content}`;
+  }).join("\n\n---\n\n");
   const user = `# Project
 - name: ${plan.projectName}
 - title: ${plan.projectTitle}
@@ -204,7 +216,7 @@ Now produce the final file tree JSON.`;
     async (attempt) => {
       // Bump tokens on retry to fight truncation, which is the #1 cause of Unbalanced JSON.
       const max_tokens = attempt === 1 ? 16000 : attempt === 2 ? 24000 : 32000;
-      const { text, usage } = await callClaude({
+      const { text, usage } = await callClaudeStream({
         apiKey,
         system: INTEGRATOR_SYSTEM,
         messages: [{ role: "user", content: user }],

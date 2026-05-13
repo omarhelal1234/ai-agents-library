@@ -136,7 +136,10 @@
           <input type="password" id="cfg-passphrase" placeholder="set once — needed to decrypt on each new browser session" autocomplete="off" />
           <small>Never stored. Held in tab memory only, cleared on close or after 30 min idle.</small>
         </label>
+        <button id="btn-unlock-settings" class="primary" type="button">🔓 Unlock settings</button>
+        <p id="unlock-error" class="unlock-error hidden"></p>
 
+        <div id="settings-protected" class="hidden">
         <h3>🔑 LLM keys</h3>
         <label>Anthropic API key
           <input type="password" id="key-anthropic" placeholder="sk-ant-…" autocomplete="off" />
@@ -193,6 +196,7 @@
           <button class="ghost" data-close type="button">Cancel</button>
           <button id="settings-clear" class="danger-ghost" type="button">Clear all</button>
         </div>
+        </div><!-- /settings-protected -->
       </div>
     </div>
   </div>

@@ -15,8 +15,8 @@ export function isRetryableError(err) {
   const m = (err && err.message) ? String(err.message) : String(err);
   // Aborted requests are NOT retryable
   if (m.includes("aborted") || (err.name === "AbortError")) return false;
-  // Network / fetch errors
-  if (m.includes("NetworkError") || m.includes("Failed to fetch") || m.includes("ECONN")) return true;
+  // Network / fetch errors ("Load failed" is Safari/WebKit's equivalent of Chrome's "Failed to fetch")
+  if (/NetworkError|Failed to fetch|Load failed|ECONN/i.test(m)) return true;
   // HTTP 5xx pattern from our API clients: "Anthropic 500", "OpenAI 503", "GitHub 502", "Supabase 504"
   if (/(\b)([5][0-9]{2})\b/.test(m)) return true;
   // Rate limits
