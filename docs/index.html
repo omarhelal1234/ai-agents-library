@@ -177,6 +177,10 @@
             <option value="sa-east-1">sa-east-1 (São Paulo)</option>
           </select>
         </label>
+        <label>CORS proxy URL <span class="muted">(required for browser use)</span>
+          <input type="url" id="cfg-supabase-proxy" placeholder="https://<ref>.supabase.co/functions/v1/cors-proxy" autocomplete="off" />
+          <small>The Supabase Management API blocks browser requests (CORS). The <code>cors-proxy</code> Edge Function relays these calls. Auto-detected from the state backend URL.</small>
+        </label>
 
         <h3>📚 Agent source</h3>
         <label>GitHub repo for agent personas

@@ -92,3 +92,4 @@ integrations/qwen/agents/
 integrations/kimi/*/
 !integrations/openclaw/README.md
 !integrations/kimi/README.md
+wrangler.jsonc

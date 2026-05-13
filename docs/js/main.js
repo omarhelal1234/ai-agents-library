@@ -82,6 +82,7 @@ const SKEYS = {
   ghOwner:    "agency.cfg.ghOwner",
   supaOrg:    "agency.cfg.supaOrg",
   supaRegion: "agency.cfg.supaRegion",
+  supaProxy:  "agency.cfg.supaProxy",
   agentsRepo: "agency.cfg.agentsRepo",
   stateUrl:   "agency.state.url",
   stateKey:   "agency.state.anonKey",
@@ -99,6 +100,7 @@ function seedFromAutoConfig() {
     ghOwner:    SKEYS.ghOwner,
     supaOrg:    SKEYS.supaOrg,
     supaRegion: SKEYS.supaRegion,
+    supaProxy:  SKEYS.supaProxy,
     agentsRepo: SKEYS.agentsRepo,
   };
   for (const [k, storageKey] of Object.entries(map)) {
@@ -126,6 +128,12 @@ function loadSettings() {
   const s = {};
   for (const k in SKEYS) s[k] = localStorage.getItem(SKEYS[k]) || "";
   if (!s.supaRegion) s.supaRegion = "us-east-1";
+  // Auto-derive CORS proxy from state backend URL if not explicitly set
+  if (!s.supaProxy && s.stateUrl) {
+    s.supaProxy = s.stateUrl.replace(/\/+$/, "") + "/functions/v1/cors-proxy";
+  }
+  // Apply CORS proxy setting to supabase client
+  sb.setProxyUrl(s.supaProxy);
   // Overlay decrypted secrets on top of localStorage values
   if (_decryptedSecrets) {
     for (const name of SECRET_NAMES) {
@@ -847,6 +855,7 @@ function openSettings() {
   $("cfg-supabase-org").value = s.supaOrg;
   $("cfg-supabase-region").value = s.supaRegion || "us-east-1";
   $("cfg-agents-repo").value = s.agentsRepo;
+  if ($("cfg-supabase-proxy")) $("cfg-supabase-proxy").value = s.supaProxy;
   if ($("cfg-state-url"))     $("cfg-state-url").value     = s.stateUrl;
   if ($("cfg-state-anonkey")) $("cfg-state-anonkey").value = s.stateKey;
   $("modal-settings").classList.remove("hidden");
@@ -866,6 +875,7 @@ async function applySettings() {
       [SKEYS.ghOwner]:    $("cfg-gh-owner").value.trim(),
       [SKEYS.supaOrg]:    $("cfg-supabase-org").value.trim(),
       [SKEYS.supaRegion]: $("cfg-supabase-region").value,
+      [SKEYS.supaProxy]:  $("cfg-supabase-proxy") ? $("cfg-supabase-proxy").value.trim() : "",
       [SKEYS.agentsRepo]: $("cfg-agents-repo").value.trim(),
       [SKEYS.stateUrl]:   $("cfg-state-url")     ? $("cfg-state-url").value.trim()     : "",
       [SKEYS.stateKey]:   $("cfg-state-anonkey") ? $("cfg-state-anonkey").value.trim() : "",

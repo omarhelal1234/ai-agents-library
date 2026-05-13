@@ -3,8 +3,22 @@
 //
 // Note: the Management API is intended for organization-scoped automation,
 // not anonymous browser apps. Tokens grant full org access — treat with care.
+//
+// CORS: the Management API does not set Access-Control-Allow-Origin for browser
+// requests. Set a CORS proxy URL via setProxyUrl() to route calls through a
+// relay. The "cors-proxy" Supabase Edge Function handles this automatically.
 
 const SB = "https://api.supabase.com";
+
+let _proxyUrl = "";   // e.g. "https://my-proxy.workers.dev"
+
+export function setProxyUrl(url) {
+  _proxyUrl = (url || "").replace(/\/+$/, "");
+}
+
+function baseUrl() {
+  return _proxyUrl || SB;
+}
 
 function headers(token, json = true) {
   const h = { "Authorization": `Bearer ${token}`, "Accept": "application/json" };
@@ -13,7 +27,7 @@ function headers(token, json = true) {
 }
 
 async function sb(token, path, init = {}) {
-  const res = await fetch(`${SB}${path}`, {
+  const res = await fetch(`${baseUrl()}${path}`, {
     ...init,
     headers: { ...headers(token, init.body != null), ...(init.headers || {}) },
   });
