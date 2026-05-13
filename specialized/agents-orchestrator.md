@@ -107,6 +107,55 @@ grep "^### \[x\]" project-tasks/*-tasklist.md
 # Final pipeline completion assessment
 ```
 
+### Phase 5: Deploy to GitHub Pages (Auto-Publish)
+```bash
+# Only after Phase 4 passes — auto-deploys frontend to GitHub Pages
+
+# 1. Detect frontend framework and set base path
+REPO_NAME=$(basename "$(git remote get-url origin)" .git)
+# For Vite projects: inject base path into vite.config.ts
+if [[ -f frontend/vite.config.ts ]]; then
+  grep -q "base:" frontend/vite.config.ts || \
+    sed -i "s|plugins: \[|base: '/$REPO_NAME/',\n  plugins: [|" frontend/vite.config.ts
+fi
+# For Next.js: inject basePath into next.config
+if [[ -f frontend/next.config.js || -f frontend/next.config.mjs ]]; then
+  echo "// GitHub Pages basePath" >> frontend/next.config.mjs
+fi
+
+# 2. Inject GitHub Pages deployment workflow
+mkdir -p .github/workflows
+cp ~/.agency/templates/deploy-pages.yml .github/workflows/deploy.yml
+# Template auto-detects: Vite, Next.js, plain HTML
+
+# 3. Enable GitHub Pages via gh CLI (source: GitHub Actions)
+gh api repos/{owner}/{repo}/pages -X POST \
+  -f build_type=workflow 2>/dev/null || \
+gh api repos/{owner}/{repo}/pages -X PUT \
+  -f build_type=workflow
+
+# 4. Set repository variables for Supabase (if project uses Supabase)
+if grep -rq "supabase" frontend/src/ 2>/dev/null; then
+  gh variable set VITE_SUPABASE_URL --body "$SUPABASE_URL"
+  gh variable set VITE_SUPABASE_ANON_KEY --body "$SUPABASE_ANON_KEY"
+fi
+
+# 5. Commit deployment config and trigger workflow
+git add .github/workflows/deploy.yml frontend/vite.config.ts
+git commit -m "ci: add GitHub Pages auto-deployment"
+git push
+
+# 6. Verify deployment triggered
+gh run list --workflow=deploy.yml --limit 1
+echo "🚀 Site will be live at: https://{owner}.github.io/$REPO_NAME/"
+```
+
+#### Deploy Phase Requirements
+- **GitHub CLI (`gh`)**: Must be authenticated with repo access
+- **Supabase credentials**: Pulled from pipeline env or project `.env.example`
+- **No manual steps**: Pages enablement + variables + workflow all automated
+- **Idempotent**: Safe to re-run if deployment needs retry
+
 ## 🔍 Your Decision Logic
 
 ### Task-by-Task Quality Loop
@@ -174,7 +223,7 @@ grep "^### \[x\]" project-tasks/*-tasklist.md
 # WorkflowOrchestrator Status Report
 
 ## 🚀 Pipeline Progress
-**Current Phase**: [PM/ArchitectUX/DevQALoop/Integration/Complete]
+**Current Phase**: [PM/ArchitectUX/DevQALoop/Integration/Deploy/Complete]
 **Project**: [project-name]
 **Started**: [timestamp]
 
@@ -238,6 +287,7 @@ grep "^### \[x\]" project-tasks/*-tasklist.md
 **Status**: [READY/NEEDS_WORK/NOT_READY]
 **Remaining Work**: [list if any]
 **Quality Confidence**: [HIGH/MEDIUM/LOW]
+**Live URL**: [GitHub Pages URL if deployed]
 
 ---
 **Pipeline Completed**: [timestamp]
@@ -363,5 +413,5 @@ The following agents are available for orchestration based on task requirements:
 
 **Single Command Pipeline Execution**:
 ```
-Please spawn an agents-orchestrator to execute complete development pipeline for project-specs/[project]-setup.md. Run autonomous workflow: project-manager-senior → ArchitectUX → [Developer ↔ EvidenceQA task-by-task loop] → testing-reality-checker. Each task must pass QA before advancing.
+Please spawn an agents-orchestrator to execute complete development pipeline for project-specs/[project]-setup.md. Run autonomous workflow: project-manager-senior → ArchitectUX → [Developer ↔ EvidenceQA task-by-task loop] → testing-reality-checker → Deploy to GitHub Pages. Each task must pass QA before advancing. Auto-publish to GitHub Pages after final validation passes.
 ```
