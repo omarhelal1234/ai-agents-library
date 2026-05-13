@@ -70,6 +70,12 @@ creds.txt
 .env
 .env.*
 !.env.example
+# Orchestrator config files — credentials are now encrypted in the Supabase state DB.
+# These paths are blocked at the gitignore level so they can never accidentally leak.
+docs/config.js
+docs/config.local.js
+config.js
+config.local.js
 
 # Generated integration files — run scripts/convert.sh to regenerate locally
 # The scripts/ and integrations/*/README.md files ARE committed; only generated
@@ -83,3 +89,6 @@ integrations/aider/CONVENTIONS.md
 integrations/windsurf/.windsurfrules
 integrations/openclaw/*
 integrations/qwen/agents/
+integrations/kimi/*/
+!integrations/openclaw/README.md
+!integrations/kimi/README.md

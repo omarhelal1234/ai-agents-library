@@ -1,8 +1,9 @@
 // Orchestrator: given an idea + the full agent catalog, asks Claude to assemble
 // the right team and a phased execution plan. Output is strict JSON.
 
-import { callClaudeJSON } from "./api.js";
+import { callClaudeJSON, callClaude, extractJSON } from "./api.js";
 import { buildCatalogForPrompt } from "./agents.js";
+import { retryAsync } from "./retry.js";
 
 const PLAN_SYSTEM = `You are the Orchestrator for "The Agency" — a roster of 180+ specialist AI agents organized into divisions. Given a user idea, you decide:
 
@@ -172,7 +173,14 @@ REQUIREMENTS
 - Keep file content COMPLETE — no "TODO" stubs.
 - Total files: aim for 4 to 20, only what's needed.`;
 
-export async function integrateOutputs({ apiKey, plan, outputs, hasSupabase, signal }) {
+// Resilient integrator:
+//   - Wraps the LLM call + JSON parse in retryAsync (handles 5xx + Unbalanced JSON).
+//   - Calls `onAttempt` after each attempt with the raw text so the caller can
+//     persist it to the state store BEFORE parsing. This means a truncated
+//     response is still inspectable / manually recoverable instead of being lost.
+//   - Bumps max_tokens on retry to widen the recovery window for the most common
+//     failure mode (output truncation).
+export async function integrateOutputs({ apiKey, plan, outputs, hasSupabase, signal, onAttempt }) {
   const blocks = outputs.map((o) => `## ${o.slug} (${o.name})\n\n${o.output}`).join("\n\n---\n\n");
   const user = `# Project
 - name: ${plan.projectName}
@@ -189,18 +197,51 @@ ${blocks}
 
 Now produce the final file tree JSON.`;
 
-  const { parsed, usage } = await callClaudeJSON({
-    apiKey,
-    system: INTEGRATOR_SYSTEM,
-    user,
-    max_tokens: 16000,
-    signal,
-  });
-  if (!parsed || !Array.isArray(parsed.files) || parsed.files.length === 0) {
-    throw new Error("Integrator returned no files");
-  }
-  // Sanity: ensure every file has path + content as strings
-  parsed.files = parsed.files.filter((f) => typeof f.path === "string" && typeof f.content === "string");
-  parsed._usage = usage;
+  let lastUsage = null;
+  let lastRaw = null;
+
+  const parsed = await retryAsync(
+    async (attempt) => {
+      // Bump tokens on retry to fight truncation, which is the #1 cause of Unbalanced JSON.
+      const max_tokens = attempt === 1 ? 16000 : attempt === 2 ? 24000 : 32000;
+      const { text, usage } = await callClaude({
+        apiKey,
+        system: INTEGRATOR_SYSTEM,
+        messages: [{ role: "user", content: user }],
+        max_tokens,
+        temperature: 0.2,
+        signal,
+      });
+      lastUsage = usage;
+      lastRaw = text;
+      // Persist raw BEFORE parsing — so we keep it even if extractJSON throws.
+      if (onAttempt) {
+        try { await onAttempt({ attempt, raw: text, parsed: null, error: null }); } catch {}
+      }
+      const out = extractJSON(text);
+      if (!out || !Array.isArray(out.files) || out.files.length === 0) {
+        throw new Error("Integrator returned no files");
+      }
+      out.files = out.files.filter((f) => typeof f.path === "string" && typeof f.content === "string");
+      // Persist parsed on success
+      if (onAttempt) {
+        try { await onAttempt({ attempt, raw: text, parsed: out, error: null }); } catch {}
+      }
+      return out;
+    },
+    {
+      retries: 3,
+      baseDelayMs: 2000,
+      onAttempt: ({ attempt, error, willRetry, nextDelayMs }) => {
+        if (error && onAttempt) {
+          // Caller already got the raw text on success; on failure persist the error too.
+          try { onAttempt({ attempt, raw: lastRaw, parsed: null, error: error.message }); } catch {}
+        }
+      },
+    }
+  );
+
+  parsed._usage = lastUsage;
+  parsed._raw = lastRaw;
   return parsed;
 }

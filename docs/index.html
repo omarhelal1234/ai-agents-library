@@ -121,7 +121,21 @@
         <button class="modal-close" data-close type="button" aria-label="Close">✕</button>
       </header>
       <div class="modal-body">
-        <p class="muted">Keys are stored only in your browser's <code>localStorage</code>. Nothing is sent to any server other than the API endpoints listed below.</p>
+        <p class="muted">API keys are <strong>encrypted in your Supabase state DB</strong> (AES-GCM, PBKDF2-derived from your passphrase). The DB never sees plaintext. Non-secret config (owner, region, repo) stays in <code>localStorage</code>.</p>
+
+        <h3>🗄 State backend <small class="muted">(required for encrypted secrets + run history)</small></h3>
+        <label>Supabase project URL
+          <input type="text" id="cfg-state-url" placeholder="https://&lt;ref&gt;.supabase.co" autocomplete="off" />
+          <small>Dedicated Supabase project for run state. Created automatically when you first set this up.</small>
+        </label>
+        <label>Supabase publishable / anon key
+          <input type="text" id="cfg-state-anonkey" placeholder="sb_publishable_… or eyJ…" autocomplete="off" />
+          <small>Public anon key. Safe to expose — ciphertext is useless without your passphrase.</small>
+        </label>
+        <label>Passphrase <span class="muted">(used to encrypt/decrypt your API keys)</span>
+          <input type="password" id="cfg-passphrase" placeholder="set once — needed to decrypt on each new browser session" autocomplete="off" />
+          <small>Never stored. Held in tab memory only, cleared on close or after 30 min idle.</small>
+        </label>
 
         <h3>🔑 LLM keys</h3>
         <label>Anthropic API key
@@ -183,9 +197,8 @@
     <span>🎭 The Agency Orchestrator — runs entirely in your browser. <a href="https://github.com/msitarzewski/agency-agents" target="_blank" rel="noopener">Source repo</a> · MIT</span>
   </footer>
 
-  <!-- Optional: define window.AGENCY_CONFIG to auto-seed localStorage on first load.
-       Loaded before main.js so the controller can read it on init. -->
-  <script src="config.js" onerror="window.__noConfig=true"></script>
+  <!-- All credentials are now encrypted in the Supabase state DB; config.js is
+       deliberately not loaded to prevent committing keys to the repo. -->
   <script type="module" src="js/main.js"></script>
 </body>
 </html>
