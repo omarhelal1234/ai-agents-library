@@ -9,7 +9,7 @@
 //      integrator does not erase the work of 10 successful agents.
 //   4. Failed runs expose a "Resume" button; shipped runs expose "Request change".
 
-import { loadRegistry, getRegistry, agentsByDivision, getAgentBySlug } from "./agents.js";
+import { loadRegistry, getRegistry, agentsByDivision, getAgentBySlug, buildCatalogForPrompt } from "./agents.js";
 import { planTeam, integrateOutputs } from "./orchestrator.js";
 import { createRunner } from "./runner.js";
 import * as gh from "./github.js";
@@ -17,6 +17,7 @@ import * as sb from "./supabase.js";
 import * as state from "./state.js";
 import * as cryptoMod from "./crypto.js";
 import { retryAsync } from "./retry.js";
+import { callClaudeJSON } from "./api.js";
 
 // =====================================================================
 // Encrypted secrets — in-memory cache loaded from Supabase on demand.
@@ -342,6 +343,7 @@ async function renderRuns() {
     }
     if (status === "shipped" && hasFullPlan) {
       actions.push(`<button class="ghost-sm" data-action="cr" data-id="${r.id}" type="button">✎ Request change</button>`);
+      actions.push(`<button class="ghost-sm ghost-sm-bug" data-action="bug" data-id="${r.id}" type="button">🐛 Report bug</button>`);
     }
     actions.push(`<button class="ghost-sm" data-action="details" data-id="${r.id}" type="button">Details</button>`);
 
@@ -369,6 +371,8 @@ async function onRunAction(action, id) {
     runPipeline({ runId: id, mode: "resume" });
   } else if (action === "cr") {
     await openChangeRequestPrompt(id);
+  } else if (action === "bug") {
+    await openBugReportPrompt(id);
   } else if (action === "details") {
     await openRunDetails(id);
   }
@@ -377,19 +381,19 @@ async function onRunAction(action, id) {
 async function openChangeRequestPrompt(runId) {
   const run = await state.getRun(runId);
   if (!run || !run.plan) { alert("Run not found or has no plan."); return; }
-  const slugs = (run.plan.team || []).map((m) => m.slug);
-  const list = slugs.map((s) => `  - ${s}`).join("\n");
-  const chosen = prompt(
-    `Which agents should re-run for this CR? Comma-separated slugs.\n\nAvailable:\n${list}`,
-    slugs.slice(0, 1).join(",")
-  );
-  if (!chosen) return;
-  const targetSlugs = chosen.split(",").map((s) => s.trim()).filter(Boolean);
-  if (targetSlugs.length === 0) return;
-  const change = prompt(`Describe the change. This will become the new task for: ${targetSlugs.join(", ")}`, "");
+  const change = prompt(`Describe the change you'd like to make. The orchestrator will analyze it and auto-assign the right agents.`, "");
   if (!change) return;
-  // Build new_tasks map: same change text for each selected agent. The integrator
-  // will reconcile against existing files in the repo.
+
+  const settings = loadSettings();
+  if (!settings.anthropic) { alert("Add your Anthropic API key in Settings first."); return; }
+
+  // Auto-assign agents by analyzing the CR with Claude
+  const targetSlugs = await analyzeChangeRequest(settings.anthropic, run.plan, change);
+  if (!targetSlugs || targetSlugs.length === 0) { alert("Could not determine which agents to assign. Please try again with a more specific description."); return; }
+
+  const confirmMsg = `The following agents will be re-run for this change:\n\n${targetSlugs.map(s => `  - ${s}`).join("\n")}\n\nProceed?`;
+  if (!confirm(confirmMsg)) return;
+
   const newTasks = {};
   for (const s of targetSlugs) newTasks[s] = change;
   const cr = await state.createChangeRequest({
@@ -399,6 +403,105 @@ async function openChangeRequestPrompt(runId) {
     newTasks,
   });
   runPipeline({ runId, mode: "cr", changeRequest: cr });
+}
+
+// Analyze a CR description and auto-assign the right agents from the existing plan
+async function analyzeChangeRequest(apiKey, plan, description) {
+  const teamList = (plan.team || []).map(m => `${m.slug} — ${m.task}`).join("\n");
+  const system = `You are the Orchestrator for "The Agency". Given a change request and the current team, select which agents should re-run. Pick ONLY agents that are relevant to the change. Respond with strict JSON, no prose: { "agents": ["slug1", "slug2"] }`;
+  const user = `# Current project
+- Title: ${plan.projectTitle}
+- Summary: ${plan.summary}
+
+# Current team
+${teamList}
+
+# Change request
+${description}
+
+Return the agents array now.`;
+  try {
+    const { parsed } = await callClaudeJSON({ apiKey, system, user, max_tokens: 1000 });
+    if (parsed && Array.isArray(parsed.agents)) {
+      const validSlugs = new Set((plan.team || []).map(m => m.slug));
+      return parsed.agents.filter(s => validSlugs.has(s));
+    }
+  } catch (e) {
+    console.warn("Auto-assign failed, falling back to manual:", e);
+  }
+  // Fallback: ask user manually
+  const slugs = (plan.team || []).map(m => m.slug);
+  const list = slugs.map(s => `  - ${s}`).join("\n");
+  const chosen = prompt(`Auto-assignment failed. Select agents manually (comma-separated):\n\n${list}`, slugs.slice(0, 1).join(","));
+  if (!chosen) return null;
+  return chosen.split(",").map(s => s.trim()).filter(Boolean);
+}
+
+// Bug report: auto-assigns support engineer + relevant agents for fixing
+async function openBugReportPrompt(runId) {
+  const run = await state.getRun(runId);
+  if (!run || !run.plan) { alert("Run not found or has no plan."); return; }
+  const bugDesc = prompt(`Describe the bug. The orchestrator will auto-assign a support engineer and relevant agents to fix it.`, "");
+  if (!bugDesc) return;
+
+  const settings = loadSettings();
+  if (!settings.anthropic) { alert("Add your Anthropic API key in Settings first."); return; }
+
+  // Auto-assign: always include engineering-sre as support engineer, plus analyze for others
+  const targetSlugs = await analyzeBugReport(settings.anthropic, run.plan, bugDesc);
+  if (!targetSlugs || targetSlugs.length === 0) { alert("Could not determine which agents to assign. Please try again."); return; }
+
+  const confirmMsg = `The following agents will be assigned to fix this bug:\n\n${targetSlugs.map(s => `  - ${s}`).join("\n")}\n\nProceed?`;
+  if (!confirm(confirmMsg)) return;
+
+  const bugTask = `[BUG REPORT] ${bugDesc}\n\nYour task: Investigate and fix this bug. Ensure the fix does not introduce regressions. Provide the corrected code with clear explanations of what was wrong and how you fixed it.`;
+  const newTasks = {};
+  for (const s of targetSlugs) newTasks[s] = bugTask;
+  const cr = await state.createChangeRequest({
+    runId,
+    description: `[BUG] ${bugDesc}`,
+    agentSlugs: targetSlugs,
+    newTasks,
+  });
+  runPipeline({ runId, mode: "cr", changeRequest: cr });
+}
+
+// Analyze a bug report and auto-assign support engineer + relevant agents
+async function analyzeBugReport(apiKey, plan, bugDescription) {
+  const teamList = (plan.team || []).map(m => `${m.slug} — ${m.task}`).join("\n");
+  const catalog = buildCatalogForPrompt();
+  const system = `You are the Orchestrator for "The Agency". Given a bug report and the current team, select which agents should be assigned to fix the bug.
+
+RULES:
+- Always include "engineering-sre" as the lead support engineer for bug fixing. If engineering-sre is not in the current team, still include it — it will be added.
+- Also include any current team members whose work area is affected by the bug.
+- Keep the team small: 1-4 agents total.
+- Respond with strict JSON, no prose: { "agents": ["slug1", "slug2"] }`;
+  const user = `# Current project
+- Title: ${plan.projectTitle}
+- Summary: ${plan.summary}
+- Tech stack: ${(plan.techStack || []).join(", ")}
+
+# Current team
+${teamList}
+
+# Full agent catalog (for adding support engineer if not in team)
+${catalog}
+
+# Bug report
+${bugDescription}
+
+Return the agents array now.`;
+  try {
+    const { parsed } = await callClaudeJSON({ apiKey, system, user, max_tokens: 1000 });
+    if (parsed && Array.isArray(parsed.agents) && parsed.agents.length > 0) {
+      return parsed.agents;
+    }
+  } catch (e) {
+    console.warn("Bug analysis failed:", e);
+  }
+  // Fallback: default to engineering-sre
+  return ["engineering-sre"];
 }
 
 async function openRunDetails(id) {
@@ -627,10 +730,37 @@ async function runPipeline({ idea, runId, mode = "fresh", changeRequest = null }
     const forceRerunSlugs = new Set();
     if (mode === "cr" && changeRequest) {
       effectivePlan = JSON.parse(JSON.stringify(plan));   // deep clone
+      const existingSlugs = new Set(effectivePlan.team.map(m => m.slug));
       for (const m of effectivePlan.team) {
         if (changeRequest.new_tasks && changeRequest.new_tasks[m.slug]) {
           m.task = `${m.task}\n\n[CHANGE REQUEST] ${changeRequest.new_tasks[m.slug]}`;
           forceRerunSlugs.add(m.slug);
+        }
+      }
+      // Add agents not in the original team (e.g., engineering-sre for bug reports)
+      if (changeRequest.new_tasks) {
+        const lastPhase = Math.max(...effectivePlan.team.map(m => m.phase || 1));
+        for (const slug of Object.keys(changeRequest.new_tasks)) {
+          if (!existingSlugs.has(slug)) {
+            const agentInfo = getAgentBySlug(slug);
+            effectivePlan.team.push({
+              slug,
+              rationale: "Auto-assigned for this change request",
+              task: `[CHANGE REQUEST] ${changeRequest.new_tasks[slug]}`,
+              model: "claude",
+              phase: lastPhase,
+              dependsOn: [],
+            });
+            // Add to the last phase
+            const phaseEntry = effectivePlan.phases.find(p => p.phase === lastPhase);
+            if (phaseEntry) {
+              phaseEntry.agents.push(slug);
+            } else {
+              effectivePlan.phases.push({ phase: lastPhase, label: `Phase ${lastPhase}`, agents: [slug] });
+            }
+            forceRerunSlugs.add(slug);
+            log("info", `CR: added ${agentInfo?.name || slug} (not in original team)`);
+          }
         }
       }
       log("info", `CR: forcing re-run of ${forceRerunSlugs.size} agent(s)`);
@@ -702,12 +832,12 @@ async function runPipeline({ idea, runId, mode = "fresh", changeRequest = null }
     await state.updateRun(run.id, {
       integrator_files: integrated,
       integrator_raw: integrated._raw || null,
-      status: "publishing",
-      current_step: "publish",
+      status: "committing",
+      current_step: "commit",
     });
 
-    // ============ 5. PUBLISH ============
-    setStep("publish", "active");
+    // ============ 5. COMMIT ============
+    setStep("commit", "active");
 
     let files = integrated.files.slice();
     // Auto-inject .env / env.js for static sites with Supabase
@@ -770,6 +900,10 @@ async function runPipeline({ idea, runId, mode = "fresh", changeRequest = null }
         }
       }
     }
+    setStep("commit", "done");
+
+    // ============ 5b. DEPLOY (GitHub Pages) ============
+    setStep("deploy", "active");
 
     // Pages
     let pagesUrl = run.pages_url || null;
@@ -786,7 +920,7 @@ async function runPipeline({ idea, runId, mode = "fresh", changeRequest = null }
         log("warn", `Could not enable Pages automatically: ${e.message}`);
       }
     }
-    setStep("publish", "done");
+    setStep("deploy", "done");
 
     // ============ 6. DONE ============
     setStep("done", "active");
@@ -1018,6 +1152,9 @@ async function init() {
   $("nav-roster").addEventListener("click", () => { setView("roster"); renderRoster($("roster-search").value); });
   $("nav-runs").addEventListener("click", () => { setView("runs"); renderRuns(); });
   $("nav-settings").addEventListener("click", openSettings);
+  $("nav-home").addEventListener("click", () => { setView("input"); });
+  document.querySelector(".brand").addEventListener("click", () => { setView("input"); });
+  document.querySelector(".brand").style.cursor = "pointer";
 
   $("settings-save").addEventListener("click", applySettings);
   $("btn-unlock-settings").addEventListener("click", unlockSettings);

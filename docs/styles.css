@@ -141,6 +141,8 @@ input, textarea, select { font: inherit; color: inherit; }
   padding: 4px 10px; border-radius: 6px; font-size: 12px; transition: 0.15s;
 }
 .ghost-sm:hover { color: var(--text); border-color: var(--border2); }
+.ghost-sm-bug { color: var(--orange); border-color: rgba(251,146,60,0.3); }
+.ghost-sm-bug:hover { color: var(--orange); border-color: rgba(251,146,60,0.55); background: rgba(251,146,60,0.08); }
 .danger-ghost {
   background: transparent; color: var(--red);
   border: 1px solid rgba(248,113,113,0.3);
