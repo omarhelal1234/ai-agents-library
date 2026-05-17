@@ -1,0 +1,20 @@
+{
+  "name": "agency-wa-bridge",
+  "version": "0.1.0",
+  "description": "WhatsApp <-> Supabase bridge for The Agency orchestrator",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "qrcode-terminal": "^0.12.0",
+    "undici": "^6.19.8",
+    "whatsapp-web.js": "^1.26.0"
+  }
+}

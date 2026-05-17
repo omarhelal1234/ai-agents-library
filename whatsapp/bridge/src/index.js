@@ -1,0 +1,164 @@
+// WhatsApp <-> Supabase bridge.
+//
+// One Node process. Holds the whatsapp-web.js session (LocalAuth on a
+// persistent volume). Forwards inbound messages to a Supabase Edge Function
+// webhook, and exposes a small HTTP API for outbound sends.
+//
+// Auth between this bridge and Supabase is a shared bearer secret in
+// BRIDGE_SECRET, set on both sides.
+
+import express from "express";
+import qrcode from "qrcode-terminal";
+import { fetch } from "undici";
+import wweb from "whatsapp-web.js";
+
+const { Client, LocalAuth, MessageMedia } = wweb;
+
+const PORT = Number(process.env.PORT || 8080);
+const BRIDGE_SECRET = required("BRIDGE_SECRET");
+const SUPABASE_WEBHOOK_URL = required("SUPABASE_WEBHOOK_URL");
+const SUPABASE_SERVICE_ROLE = required("SUPABASE_SERVICE_ROLE");
+const SESSION_DIR = process.env.SESSION_DIR || "/data/wweb-session";
+const OWNER_WA_ID = process.env.OWNER_WA_ID || ""; // optional: only react to this number
+
+function required(name) {
+  const v = process.env[name];
+  if (!v) {
+    console.error(`Missing env: ${name}`);
+    process.exit(1);
+  }
+  return v;
+}
+
+const client = new Client({
+  authStrategy: new LocalAuth({ dataPath: SESSION_DIR }),
+  puppeteer: {
+    headless: true,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-accelerated-2d-canvas",
+      "--disable-gpu",
+    ],
+  },
+});
+
+let ready = false;
+
+client.on("qr", (qr) => {
+  console.log("--- SCAN THIS QR WITH WHATSAPP > LINKED DEVICES ---");
+  qrcode.generate(qr, { small: true });
+  console.log("--- end QR ---");
+});
+
+client.on("authenticated", () => console.log("authenticated"));
+client.on("auth_failure", (m) => console.error("auth_failure:", m));
+client.on("disconnected", (r) => {
+  console.error("disconnected:", r);
+  process.exit(1); // Railway restarts; session persists on volume
+});
+
+client.on("ready", () => {
+  ready = true;
+  console.log("ready. me =", client.info?.wid?._serialized);
+});
+
+client.on("message", async (msg) => {
+  try {
+    // Skip our own status broadcasts and groups (single-product MVP)
+    if (msg.from === "status@broadcast") return;
+    if (msg.from.endsWith("@g.us")) return;
+    if (OWNER_WA_ID && msg.from !== OWNER_WA_ID) return;
+
+    const payload = {
+      chat_id: msg.from,
+      wa_message_id: msg.id?._serialized,
+      from_me: false,
+      text: msg.body || "",
+      timestamp: msg.timestamp,
+    };
+    const res = await fetch(SUPABASE_WEBHOOK_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "authorization": `Bearer ${SUPABASE_SERVICE_ROLE}`,
+        "x-bridge-secret": BRIDGE_SECRET,
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      console.error("webhook non-2xx:", res.status, await res.text());
+    }
+  } catch (e) {
+    console.error("inbound handler error:", e);
+  }
+});
+
+const app = express();
+app.use(express.json({ limit: "20mb" }));
+
+app.use((req, res, next) => {
+  if (req.path === "/health") return next();
+  if (req.header("x-bridge-secret") !== BRIDGE_SECRET) {
+    return res.status(401).json({ error: "bad bridge secret" });
+  }
+  if (!ready) return res.status(503).json({ error: "not ready" });
+  next();
+});
+
+app.get("/health", (_req, res) => res.json({ ok: true, ready }));
+
+app.post("/send", async (req, res) => {
+  const { chat_id, text } = req.body || {};
+  if (!chat_id || typeof text !== "string") {
+    return res.status(400).json({ error: "chat_id and text required" });
+  }
+  try {
+    const sent = await client.sendMessage(chat_id, text);
+    res.json({ ok: true, wa_message_id: sent.id?._serialized });
+  } catch (e) {
+    console.error("send error:", e);
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.post("/send-doc", async (req, res) => {
+  const { chat_id, filename, base64, mimetype, caption } = req.body || {};
+  if (!chat_id || !filename || !base64) {
+    return res.status(400).json({ error: "chat_id, filename, base64 required" });
+  }
+  try {
+    const media = new MessageMedia(
+      mimetype || "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      base64,
+      filename,
+    );
+    const sent = await client.sendMessage(chat_id, media, { caption: caption || undefined });
+    res.json({ ok: true, wa_message_id: sent.id?._serialized });
+  } catch (e) {
+    console.error("send-doc error:", e);
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.post("/typing", async (req, res) => {
+  const { chat_id, on } = req.body || {};
+  if (!chat_id) return res.status(400).json({ error: "chat_id required" });
+  try {
+    const chat = await client.getChatById(chat_id);
+    if (on === false) await chat.clearState();
+    else await chat.sendStateTyping();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.listen(PORT, () => console.log(`bridge http on :${PORT}`));
+
+client.initialize().catch((e) => {
+  console.error("initialize failed:", e);
+  process.exit(1);
+});
