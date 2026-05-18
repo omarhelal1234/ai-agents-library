@@ -54,7 +54,14 @@ const client = new Client({
       "--disable-background-timer-throttling",
       "--disable-backgrounding-occluded-windows",
       "--disable-renderer-backgrounding",
-      "--disable-features=IsolateOrigins,site-per-process",
+      "--disable-features=IsolateOrigins,site-per-process,CalculateNativeWinOcclusion",
+      "--disable-ipc-flooding-protection",
+      "--disable-component-update",
+      "--disable-default-apps",
+      "--no-first-run",
+      "--no-zygote",
+      "--memory-pressure-off",
+      "--max-old-space-size=460",
     ],
   },
 });
@@ -83,11 +90,11 @@ client.on("ready", () => {
   startKeepalive();
 });
 
-// Health probe. The `disconnected` event only fires on a clean WhatsApp logout.
-// The underlying WebSocket can die silently with `ready === true`. Poll
-// getState() — any non-error response (most states are operational, the real
-// failure mode here is the Puppeteer protocol timing out under throttling).
-// Only restart if getState THROWS repeatedly for >3 minutes.
+// Health probe + active "wake" pings. Even with anti-throttling flags, ~512MB
+// headless Chromium will drift idle and the WA Web JS heartbeat can stall.
+// Probe every 10s — frequent enough to (a) keep the renderer warm and (b)
+// catch protocol stalls quickly. Each successful getState() also touches the
+// CDP socket, which prevents some forms of socket-level idle timeout.
 let lastGoodState = Date.now();
 let keepaliveStarted = false;
 function startKeepalive() {
@@ -104,11 +111,11 @@ function startKeepalive() {
       console.warn("keepalive: getState threw:", String(e).slice(0, 160));
     }
     const stale = Date.now() - lastGoodState;
-    if (stale > 180_000) {
+    if (stale > 60_000) {
       console.error("keepalive: protocol unresponsive for", Math.round(stale / 1000), "s — exiting for restart");
       process.exit(1);
     }
-  }, 30_000);
+  }, 10_000);
 }
 
 async function handleInbound(msg, source) {
