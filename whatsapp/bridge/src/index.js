@@ -108,11 +108,11 @@ async function handleInbound(msg, source) {
   }
 }
 
-// Listen on BOTH events. `message` is the canonical inbound event,
-// `message_create` is the catch-all (incoming + outgoing). For senders the
-// linked-device session hasn't cached, `message` sometimes silently misses
-// the first message of a fresh chat — `message_create` reliably catches it.
-client.on("message", (msg) => handleInbound(msg, "message"));
+// `message_create` is the catch-all: fires for both inbound and outbound,
+// and reliably catches the first message in a fresh chat that the plain
+// `message` event can miss on linked-device sessions. We listen on this
+// one only — listening on both causes duplicate forwards (which downstream
+// turn into spurious interrupts that abort the agent stream).
 client.on("message_create", (msg) => {
   if (msg.fromMe) return;                          // skip echoes of our own sends
   handleInbound(msg, "message_create");
