@@ -57,6 +57,7 @@ Deno.serve(async (req: Request) => {
     console.error("run-phase error:", e);
     await safeIdle(conv.id);
     await sendText(conv.wa_chat_id, `(orchestrator hit a snag: ${shortErr(e)} — say something to try again)`);
+    return new Response(`run-phase error: ${shortErr(e)}\n${e instanceof Error ? e.stack ?? "" : ""}`, { status: 500 });
   }
   return new Response("ok", { status: 200 });
 });
