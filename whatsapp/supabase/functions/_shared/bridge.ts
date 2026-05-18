@@ -13,18 +13,24 @@ function normalizeBaseUrl(raw: string): string {
   return s;
 }
 
-async function call(path: string, body: unknown): Promise<Response> {
+async function call(path: string, body: unknown, timeoutMs = 25_000): Promise<Response> {
   const url = normalizeBaseUrl(mustEnv("BRIDGE_URL"));
   const secret = mustEnv("BRIDGE_SECRET");
-  const res = await fetch(`${url}${path}`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-bridge-secret": secret,
-    },
-    body: JSON.stringify(body),
-  });
-  return res;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(`${url}${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-bridge-secret": secret,
+      },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 export async function sendText(chatId: string, text: string): Promise<string | null> {

@@ -260,7 +260,6 @@ async function streamToChat(
   await setTyping(conv.wa_chat_id, true);
   const ctrl = new AbortController();
   const prefix = `*${display.name} · ${display.role}:*`;
-  let firstChunk = true;
   let acc = "";
 
   try {
@@ -270,22 +269,11 @@ async function streamToChat(
       maxTokens: opts.maxTokens,
       abort: ctrl.signal,
     });
+    // Consume the stream — but DON'T send each chunk individually. Per-message
+    // bridge calls go through Puppeteer + WhatsApp Web; each one costs hundreds
+    // of ms minimum, and Supabase Edge Functions cap at 150s wall time. We
+    // batch into one WA message at the end and only check interrupts inline.
     for await (const chunk of iter) {
-      if (chunk.text) {
-        const visible = stripStructured(chunk.text);
-        if (visible) {
-          const out = firstChunk ? `${prefix} ${visible}` : visible;
-          firstChunk = false;
-          await sendText(conv.wa_chat_id, out);
-          await recordMessage({
-            conversationId: conv.id,
-            role: "agent",
-            content: out,
-            agentDisplayName: display.name,
-            agentRoleLabel: display.role,
-          });
-        }
-      }
       acc = chunk.fullText;
       if (chunk.done) break;
       if (await hasPendingInterrupt(conv.id)) {
@@ -303,7 +291,23 @@ async function streamToChat(
     kickSelf(conv.id);
     return null;
   }
+
   console.log(`[stream:${display.name}] full text (${acc.length} chars):`, acc.slice(0, 1200));
+
+  // Strip structured markers, send what's left as ONE WA message.
+  const visible = stripStructured(acc);
+  if (visible) {
+    const out = `${prefix} ${visible}`;
+    await sendText(conv.wa_chat_id, out);
+    await recordMessage({
+      conversationId: conv.id,
+      role: "agent",
+      content: out,
+      agentDisplayName: display.name,
+      agentRoleLabel: display.role,
+    });
+  }
+
   return { fullText: acc };
 }
 
