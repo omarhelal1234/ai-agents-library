@@ -71,12 +71,16 @@ client.on("ready", () => {
   console.log("ready. me =", client.info?.wid?._serialized);
 });
 
-client.on("message", async (msg) => {
+async function handleInbound(msg, source) {
   try {
-    // Skip our own status broadcasts and groups (single-product MVP)
+    console.log(`[${source}] from=${msg.from} fromMe=${msg.fromMe} type=${msg.type} hasBody=${!!msg.body}`);
+    if (msg.fromMe) return;                       // skip our own sends
     if (msg.from === "status@broadcast") return;
     if (msg.from.endsWith("@g.us")) return;
-    if (OWNER_WA_ID && msg.from !== OWNER_WA_ID) return;
+    if (OWNER_WA_ID && msg.from !== OWNER_WA_ID) {
+      console.log(`[${source}] dropped by OWNER_WA_ID filter (expected ${OWNER_WA_ID})`);
+      return;
+    }
 
     const payload = {
       chat_id: msg.from,
@@ -96,10 +100,22 @@ client.on("message", async (msg) => {
     });
     if (!res.ok) {
       console.error("webhook non-2xx:", res.status, await res.text());
+    } else {
+      console.log(`[${source}] forwarded to Supabase ok`);
     }
   } catch (e) {
     console.error("inbound handler error:", e);
   }
+}
+
+// Listen on BOTH events. `message` is the canonical inbound event,
+// `message_create` is the catch-all (incoming + outgoing). For senders the
+// linked-device session hasn't cached, `message` sometimes silently misses
+// the first message of a fresh chat — `message_create` reliably catches it.
+client.on("message", (msg) => handleInbound(msg, "message"));
+client.on("message_create", (msg) => {
+  if (msg.fromMe) return;                          // skip echoes of our own sends
+  handleInbound(msg, "message_create");
 });
 
 const app = express();
