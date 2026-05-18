@@ -8,7 +8,8 @@
 // BRIDGE_SECRET, set on both sides.
 
 import express from "express";
-import qrcode from "qrcode-terminal";
+import qrTerminal from "qrcode-terminal";
+import QRCode from "qrcode";
 import { fetch } from "undici";
 import wweb from "whatsapp-web.js";
 
@@ -46,11 +47,13 @@ const client = new Client({
 });
 
 let ready = false;
+let latestQr = null;
 
 client.on("qr", (qr) => {
+  latestQr = qr;
   console.log("--- SCAN THIS QR WITH WHATSAPP > LINKED DEVICES ---");
-  qrcode.generate(qr, { small: true });
-  console.log("--- end QR ---");
+  qrTerminal.generate(qr, { small: true });
+  console.log(`--- or open https://<your-railway-domain>/qr in a browser ---`);
 });
 
 client.on("authenticated", () => console.log("authenticated"));
@@ -62,6 +65,7 @@ client.on("disconnected", (r) => {
 
 client.on("ready", () => {
   ready = true;
+  latestQr = null;
   console.log("ready. me =", client.info?.wid?._serialized);
 });
 
@@ -99,6 +103,19 @@ client.on("message", async (msg) => {
 const app = express();
 app.use(express.json({ limit: "20mb" }));
 
+// /qr is intentionally unauthenticated — the QR string IS the auth handshake;
+// it's only present briefly while pairing, and the value is single-use.
+app.get("/qr", async (_req, res) => {
+  if (ready) return res.status(200).send(html("Already linked. No QR needed.", null));
+  if (!latestQr) return res.status(200).send(html("No QR yet — waiting for WhatsApp client to start. Refresh in a few seconds.", null));
+  try {
+    const svg = await QRCode.toString(latestQr, { type: "svg", margin: 1, width: 320 });
+    res.set("content-type", "text/html").send(html("Scan with WhatsApp → Settings → Linked Devices", svg));
+  } catch (e) {
+    res.status(500).send(html(`QR render error: ${e}`, null));
+  }
+});
+
 app.use((req, res, next) => {
   if (req.path === "/health") return next();
   if (req.header("x-bridge-secret") !== BRIDGE_SECRET) {
@@ -109,6 +126,12 @@ app.use((req, res, next) => {
 });
 
 app.get("/health", (_req, res) => res.json({ ok: true, ready }));
+
+function html(title, svg) {
+  return `<!doctype html><html><head><meta charset="utf-8"><title>WA bridge QR</title>
+<style>body{font-family:system-ui;background:#111;color:#eee;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;margin:0}h1{font-weight:500;font-size:18px;margin:0 0 24px}svg{background:#fff;padding:16px;border-radius:8px}</style>
+</head><body><h1>${title}</h1>${svg ?? ""}</body></html>`;
+}
 
 app.post("/send", async (req, res) => {
   const { chat_id, text } = req.body || {};
