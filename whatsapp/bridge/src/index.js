@@ -69,7 +69,36 @@ client.on("ready", () => {
   ready = true;
   latestQr = null;
   console.log("ready. me =", client.info?.wid?._serialized);
+  startKeepalive();
 });
+
+// Health probe. The `disconnected` event only fires on a clean WhatsApp logout
+// or explicit unlink — but the underlying WebSocket can die silently, leaving
+// `ready === true` while no inbound events fire. Poll getState() and exit
+// (Railway restarts; session persists on the volume) on prolonged failure.
+let lastGoodState = Date.now();
+let keepaliveStarted = false;
+function startKeepalive() {
+  if (keepaliveStarted) return;
+  keepaliveStarted = true;
+  setInterval(async () => {
+    try {
+      const state = await client.getState();
+      if (state === "CONNECTED") {
+        lastGoodState = Date.now();
+      } else {
+        console.warn("keepalive: non-CONNECTED state:", state);
+      }
+    } catch (e) {
+      console.warn("keepalive: getState threw:", String(e));
+    }
+    const stale = Date.now() - lastGoodState;
+    if (stale > 90_000) {
+      console.error("keepalive: no CONNECTED state for", Math.round(stale / 1000), "s — exiting for restart");
+      process.exit(1);
+    }
+  }, 20_000);
+}
 
 async function handleInbound(msg, source) {
   try {
