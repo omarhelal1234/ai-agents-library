@@ -35,15 +35,26 @@ function required(name) {
 
 const client = new Client({
   authStrategy: new LocalAuth({ dataPath: SESSION_DIR }),
+  // Bump protocol timeout — headless tabs sometimes take >30s to respond
+  // under memory pressure.
   puppeteer: {
     headless: true,
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    protocolTimeout: 120_000,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
       "--disable-accelerated-2d-canvas",
       "--disable-gpu",
+      // Critical for headless cloud containers: Chrome throttles JS in
+      // backgrounded/occluded renderers, which on headless servers means
+      // ALWAYS. WhatsApp Web's keepalive heartbeat gets paused, the
+      // WebSocket times out, and inbound messages stop arriving.
+      "--disable-background-timer-throttling",
+      "--disable-backgrounding-occluded-windows",
+      "--disable-renderer-backgrounding",
+      "--disable-features=IsolateOrigins,site-per-process",
     ],
   },
 });
@@ -72,10 +83,11 @@ client.on("ready", () => {
   startKeepalive();
 });
 
-// Health probe. The `disconnected` event only fires on a clean WhatsApp logout
-// or explicit unlink — but the underlying WebSocket can die silently, leaving
-// `ready === true` while no inbound events fire. Poll getState() and exit
-// (Railway restarts; session persists on the volume) on prolonged failure.
+// Health probe. The `disconnected` event only fires on a clean WhatsApp logout.
+// The underlying WebSocket can die silently with `ready === true`. Poll
+// getState() — any non-error response (most states are operational, the real
+// failure mode here is the Puppeteer protocol timing out under throttling).
+// Only restart if getState THROWS repeatedly for >3 minutes.
 let lastGoodState = Date.now();
 let keepaliveStarted = false;
 function startKeepalive() {
@@ -84,20 +96,19 @@ function startKeepalive() {
   setInterval(async () => {
     try {
       const state = await client.getState();
-      if (state === "CONNECTED") {
-        lastGoodState = Date.now();
-      } else {
-        console.warn("keepalive: non-CONNECTED state:", state);
+      lastGoodState = Date.now();
+      if (state !== "CONNECTED") {
+        console.log("keepalive: state =", state);
       }
     } catch (e) {
-      console.warn("keepalive: getState threw:", String(e));
+      console.warn("keepalive: getState threw:", String(e).slice(0, 160));
     }
     const stale = Date.now() - lastGoodState;
-    if (stale > 90_000) {
-      console.error("keepalive: no CONNECTED state for", Math.round(stale / 1000), "s — exiting for restart");
+    if (stale > 180_000) {
+      console.error("keepalive: protocol unresponsive for", Math.round(stale / 1000), "s — exiting for restart");
       process.exit(1);
     }
-  }, 20_000);
+  }, 30_000);
 }
 
 async function handleInbound(msg, source) {
