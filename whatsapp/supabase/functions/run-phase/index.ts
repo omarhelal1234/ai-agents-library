@@ -38,28 +38,36 @@ const BRIDGE_SECRET = Deno.env.get("BRIDGE_SECRET") ?? "";
 const SELF_URL = Deno.env.get("RUN_PHASE_URL") ?? "";
 
 Deno.serve(async (req: Request) => {
-  if (req.method !== "POST") return new Response("method", { status: 405 });
-  if (req.headers.get("x-bridge-secret") !== BRIDGE_SECRET) {
-    return new Response("unauthorized", { status: 401 });
-  }
-  let body: { conversation_id?: string };
-  try { body = await req.json(); }
-  catch { return new Response("bad json", { status: 400 }); }
-  const convId = body.conversation_id;
-  if (!convId) return new Response("missing conversation_id", { status: 400 });
-
-  const conv = await getConversationById(convId);
-  if (!conv) return new Response("not found", { status: 404 });
-
   try {
-    await runChunk(conv);
-  } catch (e) {
-    console.error("run-phase error:", e);
-    await safeIdle(conv.id);
-    await sendText(conv.wa_chat_id, `(orchestrator hit a snag: ${shortErr(e)} — say something to try again)`);
-    return new Response(`run-phase error: ${shortErr(e)}\n${e instanceof Error ? e.stack ?? "" : ""}`, { status: 500 });
+    if (req.method !== "POST") return new Response("method", { status: 405 });
+    if (req.headers.get("x-bridge-secret") !== BRIDGE_SECRET) {
+      return new Response("unauthorized", { status: 401 });
+    }
+    let body: { conversation_id?: string };
+    try { body = await req.json(); }
+    catch { return new Response("bad json", { status: 400 }); }
+    const convId = body.conversation_id;
+    if (!convId) return new Response("missing conversation_id", { status: 400 });
+
+    const conv = await getConversationById(convId);
+    if (!conv) return new Response("not found", { status: 404 });
+
+    try {
+      await runChunk(conv);
+    } catch (e) {
+      console.error("run-phase error:", e);
+      await safeIdle(conv.id);
+      await sendText(conv.wa_chat_id, `(orchestrator hit a snag: ${shortErr(e)} — say something to try again)`);
+      return new Response(`run-phase error: ${shortErr(e)}\n${e instanceof Error ? e.stack ?? "" : ""}`, { status: 500 });
+    }
+    return new Response("ok", { status: 200 });
+  } catch (outer) {
+    console.error("run-phase outer error:", outer);
+    return new Response(
+      `outer error: ${outer instanceof Error ? outer.message : String(outer)}\n${outer instanceof Error ? outer.stack ?? "" : ""}`,
+      { status: 500 },
+    );
   }
-  return new Response("ok", { status: 200 });
 });
 
 async function runChunk(conv: Conversation): Promise<void> {
