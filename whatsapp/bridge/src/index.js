@@ -8,6 +8,8 @@
 // BRIDGE_SECRET, set on both sides.
 
 import express from "express";
+import fs from "node:fs";
+import path from "node:path";
 import qrTerminal from "qrcode-terminal";
 import QRCode from "qrcode";
 import { fetch } from "undici";
@@ -180,6 +182,27 @@ app.post("/typing", async (req, res) => {
 });
 
 app.listen(PORT, () => console.log(`bridge http on :${PORT}`));
+
+// Chromium leaves Singleton* lock files in the profile dir. When the container
+// is killed mid-run, those locks persist on the mounted volume and the next
+// boot thinks another browser is alive. Sweep them before initializing.
+function cleanChromiumLocks(dir) {
+  try {
+    if (!fs.existsSync(dir)) return;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        cleanChromiumLocks(p);
+      } else if (/^Singleton(Lock|Cookie|Socket)$/.test(entry.name)) {
+        try { fs.rmSync(p, { force: true }); console.log("removed stale lock:", p); }
+        catch (e) { console.error("could not remove", p, e); }
+      }
+    }
+  } catch (e) {
+    console.error("lock sweep error:", e);
+  }
+}
+cleanChromiumLocks(SESSION_DIR);
 
 client.initialize().catch((e) => {
   console.error("initialize failed:", e);
