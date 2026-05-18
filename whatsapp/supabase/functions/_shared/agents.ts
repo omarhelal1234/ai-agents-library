@@ -41,17 +41,24 @@ export async function loadPersona(slug: string): Promise<string> {
   return text;
 }
 
-// Compact catalog the PM agent sees when picking a team.
+// Compact catalog the PM agent sees when picking a team. Each entry is
+// `slug (name) — short hint`, grouped by division. Descriptions are
+// truncated to ~90 chars: enough to disambiguate agents whose name alone
+// is generic (e.g. "Senior Developer", "Evidence Collector"), without
+// reintroducing the full ~12k-token description block that previously
+// pushed PM calls over the OpenAI TPM budget.
 export async function compactCatalog(): Promise<string> {
   const all = await loadIndex();
-  // Group by division for readability.
   const by: Record<string, AgentMeta[]> = {};
   for (const a of all) (by[a.division] ??= []).push(a);
   const out: string[] = [];
   for (const div of Object.keys(by).sort()) {
     out.push(`## ${div}`);
     for (const a of by[div]) {
-      out.push(`- ${a.slug} — ${a.name}: ${a.description}`);
+      const hint = a.description.length > 90
+        ? `${a.description.slice(0, 87)}...`
+        : a.description;
+      out.push(`- ${a.slug} (${a.name}) — ${hint}`);
     }
   }
   return out.join("\n");
