@@ -16,9 +16,14 @@ const BRIDGE_SECRET = Deno.env.get("BRIDGE_SECRET") ?? "";
 const RUN_PHASE_URL = Deno.env.get("RUN_PHASE_URL") ?? "";
 
 // Hard allowlist on the sender's WhatsApp chat id. For 1:1 chats the
-// bridge sets `chat_id = msg.from`, which is the sender's WA id
-// (`<digits>@c.us`). Defense in depth against a misconfigured bridge.
-const ALLOWED_WA_CHAT_IDS = (Deno.env.get("ALLOWED_WA_CHAT_ID") ?? "201099922763@c.us")
+// bridge sets `chat_id = msg.from`, which is the sender's WA id. That
+// can be either the legacy phone form (`<digits>@c.us`) OR a privacy
+// linked-ID form (`<digits>@lid`) — list every form the owner appears
+// under. Defense in depth against a misconfigured bridge.
+// `|| default` (not `?? default`) so an empty env string falls back to
+// the default — matches bridge behavior and avoids a fail-closed
+// configuration where `ALLOWED_WA_CHAT_ID=""` blocks everything.
+const ALLOWED_WA_CHAT_IDS = (Deno.env.get("ALLOWED_WA_CHAT_ID") || "201099922763@c.us,37641194070112@lid")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);

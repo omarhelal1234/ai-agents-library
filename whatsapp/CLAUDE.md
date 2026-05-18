@@ -59,10 +59,18 @@ These are the things that have bitten this codebase before. Treat any
 diff that touches them with extra care.
 
 1. **Sender allowlist.** This system is single-tenant by design. The
-   only sender it serves is `201099922763@c.us`. Enforced in two
-   places — bridge (`OWNER_WA_ID` default) and edge function
-   (`ALLOWED_WA_CHAT_ID` default). Both defaults are hardcoded so an
-   unset env doesn't open the system up. Do not remove either check.
+   only human owner is `201099922763`. WhatsApp can deliver that human
+   under TWO different `msg.from` ids depending on the chat's privacy
+   state:
+     - legacy phone form: `201099922763@c.us`
+     - privacy linked-ID form: `37641194070112@lid`
+   Both are listed in the bridge `OWNER_WA_ID` default AND the edge
+   function `ALLOWED_WA_CHAT_ID` default (comma-separated). If you ever
+   see "dropped by OWNER_WA_ID filter" in bridge logs for a legit
+   message, check whether WhatsApp issued a new lid for this chat
+   (e.g., a fresh `@lid` value in the bridge log line) and add it to
+   the defaults. Both defaults are hardcoded so an unset env doesn't
+   open the system up. Do not remove either check.
 
 2. **Per-agent LLM routing.** PM (`product-manager`) → OpenAI for JSON
    shape discipline. Integrator (`engineering-software-architect`)

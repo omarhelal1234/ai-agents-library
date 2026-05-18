@@ -70,7 +70,9 @@ BRIDGE_URL=https://<your-railway-app>.up.railway.app
 RUN_PHASE_URL=https://ztdwgrlregbcgtalqkuh.supabase.co/functions/v1/run-phase
 CLAUDE_MODEL=claude-sonnet-4-6      # optional, defaults to this
 OPENAI_MODEL=gpt-4o                 # optional, defaults to this
-ALLOWED_WA_CHAT_ID=201099922763@c.us  # optional override; defaults to owner number
+# Comma-separated; must include EVERY id form WhatsApp delivers the owner
+# under (both @c.us and @lid). Optional override; defaults are hardcoded.
+ALLOWED_WA_CHAT_ID=201099922763@c.us,37641194070112@lid
 ```
 
 Per-agent LLM routing lives in [`_shared/llm.ts`](supabase/functions/_shared/llm.ts) — PM and ops/eng agents run on OpenAI, design/strategy/long-form synthesis agents run on Anthropic. See `providerForAgent`.
@@ -89,7 +91,11 @@ Edge Functions runtime — you don't set those manually.
    BRIDGE_SECRET=<same as Supabase>
    SUPABASE_WEBHOOK_URL=https://ztdwgrlregbcgtalqkuh.supabase.co/functions/v1/wa-inbound
    SUPABASE_SERVICE_ROLE=<the service role key — Supabase Dashboard → Project Settings → API>
-   OWNER_WA_ID=<your-number>@c.us    # optional, restricts to your number
+   # Comma-separated list of every WA id the owner appears under.
+   # WhatsApp can deliver the same human as `<digits>@c.us` (legacy
+   # phone form) OR `<digits>@lid` (privacy linked-ID). List all forms.
+   # Optional override; defaults are hardcoded.
+   OWNER_WA_ID=201099922763@c.us,37641194070112@lid
    ```
 5. Deploy. Open the Railway logs and you'll see a QR code printed in
    ASCII. On your phone: **WhatsApp → Settings → Linked Devices → Link a

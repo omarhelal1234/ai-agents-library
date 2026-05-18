@@ -22,11 +22,17 @@ const BRIDGE_SECRET = required("BRIDGE_SECRET");
 const SUPABASE_WEBHOOK_URL = required("SUPABASE_WEBHOOK_URL");
 const SUPABASE_SERVICE_ROLE = required("SUPABASE_SERVICE_ROLE");
 const SESSION_DIR = process.env.SESSION_DIR || "/data/wweb-session";
-// Hard allowlist: this bridge ONLY reacts to messages from the configured
-// owner number. Default is the production owner; override per-deploy via
-// OWNER_WA_ID env if testing with a different number. Empty string is NOT
-// honored — we never want a wide-open bridge in production.
-const OWNER_WA_ID = process.env.OWNER_WA_ID || "201099922763@c.us";
+// Hard allowlist: this bridge ONLY reacts to messages whose `msg.from`
+// matches one of these IDs. WhatsApp can deliver the same human user as
+// either the legacy phone form (`<digits>@c.us`) OR a privacy-preserving
+// linked-ID form (`<digits>@lid`) depending on the chat — we have to
+// list every form the owner appears under. Override per-deploy via
+// OWNER_WA_ID env (comma-separated). Empty string is NOT honored —
+// we never want a wide-open bridge in production.
+const OWNER_WA_IDS = (process.env.OWNER_WA_ID || "201099922763@c.us,37641194070112@lid")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 function required(name) {
   const v = process.env[name];
@@ -128,8 +134,8 @@ async function handleInbound(msg, source) {
     if (msg.fromMe) return;                       // skip our own sends
     if (msg.from === "status@broadcast") return;
     if (msg.from.endsWith("@g.us")) return;
-    if (msg.from !== OWNER_WA_ID) {
-      console.log(`[${source}] dropped by OWNER_WA_ID filter (expected ${OWNER_WA_ID}, got ${msg.from})`);
+    if (!OWNER_WA_IDS.includes(msg.from)) {
+      console.log(`[${source}] dropped by OWNER_WA_ID filter (expected one of ${OWNER_WA_IDS.join(",")}, got ${msg.from})`);
       return;
     }
 
