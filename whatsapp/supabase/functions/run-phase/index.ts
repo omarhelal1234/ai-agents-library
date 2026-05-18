@@ -295,6 +295,7 @@ async function streamToChat(
     kickSelf(conv.id);
     return null;
   }
+  console.log(`[stream:${display.name}] full text (${acc.length} chars):`, acc.slice(0, 1200));
   return { fullText: acc };
 }
 
