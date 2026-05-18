@@ -29,7 +29,7 @@ import {
   type Conversation,
 } from "../_shared/db.ts";
 import { findAgent } from "../_shared/agents.ts";
-import { oneShot, streamChunks, type ChatMsg } from "../_shared/claude.ts";
+import { providerForAgent, streamChunks, type ChatMsg, type Provider } from "../_shared/llm.ts";
 import { agentSystem, integratorSystem, pmSystem } from "../_shared/personas.ts";
 import { sendDoc, sendText, setTyping } from "../_shared/bridge.ts";
 import { encodeBase64, markdownToDocx } from "../_shared/docx.ts";
@@ -97,8 +97,10 @@ async function phaseDiscovery(conv: Conversation): Promise<void> {
   const system = await pmSystem();
   const messages = await buildClaudeMessages(conv.id);
   const display = { name: "Sarah", role: "PM" };
+  // PM emits a JSON fence every turn — pin to OpenAI for shape discipline.
+  const provider = providerForAgent("product-manager");
 
-  const acc = await streamToChat(conv, system, messages, display);
+  const acc = await streamToChat(conv, system, messages, display, { provider });
   if (acc === null) return; // interrupted; bail, next invocation will resume
 
   const decision = parseFinalJson(acc.fullText);
@@ -191,9 +193,11 @@ async function phaseBuild(conv: Conversation): Promise<void> {
   const system = await agentSystem(a.agent_slug, a.agent_role_label, product.brief ?? "");
   const messages = await buildClaudeMessages(conv.id);
   const display = { name: a.agent_display_name, role: a.agent_role_label };
+  const meta = await findAgent(a.agent_slug);
+  const provider = providerForAgent(a.agent_slug, meta?.division);
 
   // Up the token budget — agents produce deliverables.
-  const acc = await streamToChat(conv, system, messages, display, { maxTokens: 4096 });
+  const acc = await streamToChat(conv, system, messages, display, { maxTokens: 4096, provider });
   if (acc === null) return;
 
   // Split chat from deliverable on the marker.
@@ -218,8 +222,10 @@ async function phaseIntegrate(conv: Conversation): Promise<void> {
   const system = await integratorSystem(product.brief ?? "");
   const messages = await buildClaudeMessages(conv.id);
   const display = { name: "Marcus", role: "Integrator" };
+  // Long-form synthesis across every agent's doc — Claude.
+  const provider = providerForAgent("engineering-software-architect");
 
-  const acc = await streamToChat(conv, system, messages, display, { maxTokens: 4096 });
+  const acc = await streamToChat(conv, system, messages, display, { maxTokens: 4096, provider });
   if (acc === null) return;
 
   const { deliverable } = splitDeliverable(acc.fullText);
@@ -255,7 +261,7 @@ async function streamToChat(
   system: string,
   messages: ChatMsg[],
   display: Display,
-  opts: { maxTokens?: number } = {},
+  opts: { maxTokens?: number; provider: Provider },
 ): Promise<Accum | null> {
   await setTyping(conv.wa_chat_id, true);
   const ctrl = new AbortController();
@@ -264,6 +270,7 @@ async function streamToChat(
 
   try {
     const iter = streamChunks({
+      provider: opts.provider,
       system,
       messages,
       maxTokens: opts.maxTokens,

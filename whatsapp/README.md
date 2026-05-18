@@ -64,11 +64,16 @@ Set these secrets in the Supabase dashboard
 
 ```
 ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-...
 BRIDGE_SECRET=<long-random-string-you-also-set-on-railway>
 BRIDGE_URL=https://<your-railway-app>.up.railway.app
 RUN_PHASE_URL=https://ztdwgrlregbcgtalqkuh.supabase.co/functions/v1/run-phase
 CLAUDE_MODEL=claude-sonnet-4-6      # optional, defaults to this
+OPENAI_MODEL=gpt-4o                 # optional, defaults to this
+ALLOWED_WA_CHAT_ID=201099922763@c.us  # optional override; defaults to owner number
 ```
+
+Per-agent LLM routing lives in [`_shared/llm.ts`](supabase/functions/_shared/llm.ts) — PM and ops/eng agents run on OpenAI, design/strategy/long-form synthesis agents run on Anthropic. See `providerForAgent`.
 
 `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are auto-injected by the
 Edge Functions runtime — you don't set those manually.
@@ -131,7 +136,7 @@ whatsapp/
         ├── _shared/
         │   ├── agents.ts                    catalog + persona loader (from raw GH)
         │   ├── bridge.ts                    client for the WA bridge
-        │   ├── claude.ts                    streaming Claude wrapper
+        │   ├── llm.ts                       streaming Anthropic+OpenAI wrapper + per-agent routing
         │   ├── db.ts                        Postgres + Storage helpers
         │   ├── docx.ts                      markdown → .docx
         │   └── personas.ts                  system prompt builders

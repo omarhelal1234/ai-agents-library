@@ -15,6 +15,14 @@ import {
 const BRIDGE_SECRET = Deno.env.get("BRIDGE_SECRET") ?? "";
 const RUN_PHASE_URL = Deno.env.get("RUN_PHASE_URL") ?? "";
 
+// Hard allowlist on the sender's WhatsApp chat id. For 1:1 chats the
+// bridge sets `chat_id = msg.from`, which is the sender's WA id
+// (`<digits>@c.us`). Defense in depth against a misconfigured bridge.
+const ALLOWED_WA_CHAT_IDS = (Deno.env.get("ALLOWED_WA_CHAT_ID") ?? "201099922763@c.us")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 type Inbound = {
   chat_id: string;
   wa_message_id?: string;
@@ -35,6 +43,11 @@ Deno.serve(async (req: Request) => {
 
   const text = (body.text ?? "").trim();
   if (!text || !body.chat_id) return new Response("noop", { status: 200 });
+
+  if (!ALLOWED_WA_CHAT_IDS.includes(body.chat_id)) {
+    console.log(`wa-inbound: dropped ${body.chat_id} (not in allowlist)`);
+    return new Response("forbidden", { status: 403 });
+  }
 
   const conv = await getOrCreateConversation(body.chat_id);
 
