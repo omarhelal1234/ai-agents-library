@@ -17,9 +17,10 @@ COPY package.json ./
 RUN npm install --omit=dev
 
 COPY src ./src
-RUN mkdir -p /data && chown -R node:node /data /app
-USER node
+RUN mkdir -p /data
 
+# Run as root: Railway volume mounts come up root-owned, and Chromium runs
+# with --no-sandbox anyway so the unprivileged-user dance buys nothing.
 ENV SESSION_DIR=/data/wweb-session
 EXPOSE 8080
 CMD ["node", "src/index.js"]
