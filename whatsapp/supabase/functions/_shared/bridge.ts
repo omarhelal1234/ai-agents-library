@@ -7,8 +7,14 @@ function mustEnv(name: string): string {
   return v;
 }
 
+function normalizeBaseUrl(raw: string): string {
+  let s = raw.trim().replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(s)) s = "https://" + s;
+  return s;
+}
+
 async function call(path: string, body: unknown): Promise<Response> {
-  const url = mustEnv("BRIDGE_URL").replace(/\/+$/, "");
+  const url = normalizeBaseUrl(mustEnv("BRIDGE_URL"));
   const secret = mustEnv("BRIDGE_SECRET");
   const res = await fetch(`${url}${path}`, {
     method: "POST",
